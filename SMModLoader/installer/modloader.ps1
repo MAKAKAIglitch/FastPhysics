@@ -21,12 +21,20 @@ function Test-CompanyDll([string]$Path, [string]$Company) {
     (Test-Path $Path) -and ((Get-Item $Path).VersionInfo.CompanyName -match $Company)
 }
 
+function Test-MicrosoftSignerSubject([string]$Subject) {
+    if ([string]::IsNullOrWhiteSpace($Subject)) { return $false }
+    return (
+        $Subject -match '(^|,\s*)O=Microsoft Corporation(,|$)' -and
+        $Subject -match '(^|,\s*)CN=(Microsoft Corporation|Microsoft Windows Software Compatibility Publisher)(,|$)'
+    )
+}
+
 function Test-MicrosoftSignedDll([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
     try {
         $signature = Get-AuthenticodeSignature -FilePath $Path
         if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) { return $false }
-        return ($signature.SignerCertificate.Subject -match '(^|,\s*)CN=Microsoft Corporation(,|$)')
+        return (Test-MicrosoftSignerSubject $signature.SignerCertificate.Subject)
     }
     catch { return $false }
 }
