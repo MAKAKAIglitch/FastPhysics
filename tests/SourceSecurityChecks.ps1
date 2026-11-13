@@ -42,6 +42,25 @@ foreach ($relative in $scriptFiles) {
     }
 }
 
+$fastPhysicsPath = Join-Path $root 'src/FastPhysics.cpp'
+$fastPhysicsSource = Get-Content -LiteralPath $fastPhysicsPath -Raw
+foreach ($required in @(
+    'HashFileSha256',
+    'ExpectedGameExeSHA256',
+    'game executable SHA-256 pin matched',
+    'ValidateLcpSolution',
+    'IsWritableRange',
+    'InterlockedExchangePointer',
+    'g_runtimeDisabled'
+)) {
+    if (-not $fastPhysicsSource.Contains($required)) {
+        throw "The 1.0.7 safety guard is missing: $required"
+    }
+}
+if ($fastPhysicsSource -notmatch 'if \(_stricmp\(actualHash, expectedHash\) != 0\)') {
+    throw 'The exact executable SHA-256 mismatch must fail closed.'
+}
+
 $loaderPath = Join-Path $root 'SMModLoader/src/SMModLoader.cpp'
 $loaderSource = Get-Content -LiteralPath $loaderPath -Raw
 foreach ($required in @(
