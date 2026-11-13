@@ -254,8 +254,29 @@ bool WriteProtected(void* at, const void* bytes, size_t size) {
 }
 
 bool PatchPointer(void** slot, void* hook, void** original) {
+    if (!slot || !hook || !original) return false;
     *original = *slot;
-    return WriteProtected(slot, &hook, sizeof(hook));
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect)) return false;
+
+    // A vtable entry may be read concurrently by a game worker. Use an aligned atomic pointer
+    // exchange so no thread can observe a partially-written function pointer.
+    InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(slot), hook);
+    const BOOL flushed = FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void*));
+    DWORD ignored = 0;
+    const BOOL restored = VirtualProtect(slot, sizeof(void*), oldProtect, &ignored);
+
+    if (!flushed || !restored) {
+        DWORD rollbackProtect = 0;
+        if (VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &rollbackProtect)) {
+            InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(slot), *original);
+            FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void*));
+            VirtualProtect(slot, sizeof(void*), oldProtect, &ignored);
+        }
+        return false;
+    }
+    return true;
 }
 
 uint8_t* FindUnique(const Range& r, const uint8_t* sig, size_t size) {
@@ -799,10 +820,16 @@ void Init(HMODULE self) {
     if (!CpuSupportsAvx2Fma()) { Log("CPU without AVX2/FMA: the solver stays the game's own"); g_enabled = 0; return; }
     void** vt = FindVTable(".?AVbtDantzigSolver@@");
     if (!vt || !g_rdata.Contains(vt) || !g_text.Contains(vt[1])) { Log("btDantzigSolver vtable not found (%p), FastPhysics inactive", vt); return; }
-    void* o;
-    if (!PatchPointer(&vt[1], reinterpret_cast<void*>(&SolveHook), &o)) { Log("vtable patch failed"); return; }
-    g_orig = reinterpret_cast<DantzigFn>(o);
-    Log("btDantzigSolver::solveMLCP hooked (original %p)", o);
+    // Publish the original function pointer before the vtable can expose SolveHook.
+    // If a game worker calls the hook immediately after the atomic exchange, g_orig is ready.
+    void* original = vt[1];
+    g_orig = reinterpret_cast<DantzigFn>(original);
+    void* ignoredOriginal = nullptr;
+    if (!PatchPointer(&vt[1], reinterpret_cast<void*>(&SolveHook), &ignoredOriginal)) {
+        Log("vtable patch failed; the original solver pointer remains available");
+        return;
+    }
+    Log("btDantzigSolver::solveMLCP hooked (original %p)", original);
 }
 
 DWORD WINAPI InitializeWorker(LPVOID context) {
