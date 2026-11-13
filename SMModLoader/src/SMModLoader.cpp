@@ -105,8 +105,12 @@ void LoadMods(HMODULE self) {
         if (swprintf(path, MAX_PATH, L"%ls\\%ls", dir, names[i]) < 0) continue;
         char name[MAX_PATH * 3] = {};
         WideCharToMultiByte(CP_UTF8, 0, names[i], -1, name, sizeof(name) - 1, nullptr, nullptr);
-        // The mod's own dependencies are looked up next to it first
-        HMODULE mod = LoadLibraryExW(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        // Resolve dependencies only beside this mod, beside the game, in explicitly added
+        // DLL directories, or in System32. Do not search the current directory or PATH:
+        // that avoids the usual DLL-preloading search locations.
+        constexpr DWORD kSafeLoadFlags =
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+        HMODULE mod = LoadLibraryExW(path, nullptr, kSafeLoadFlags);
         if (mod) Log("Loaded %s", name);
         else Log("Failed to load %s (error %lu)", name, GetLastError());
     }
