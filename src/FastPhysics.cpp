@@ -170,6 +170,25 @@ bool IsReadableRange(const void* pointer, size_t size) {
     return true;
 }
 
+bool IsWritableRange(const void* pointer, size_t size) {
+    if (!pointer || size == 0) return false;
+    uintptr_t current = reinterpret_cast<uintptr_t>(pointer);
+    if (current > static_cast<uintptr_t>(-1) - size) return false;
+    const uintptr_t finish = current + size;
+    while (current < finish) {
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (!VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi))) return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) return false;
+        const DWORD protection = mbi.Protect & 0xFF;
+        if (protection != PAGE_READWRITE && protection != PAGE_WRITECOPY &&
+            protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY) return false;
+        const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (regionEnd <= current) return false;
+        current = regionEnd < finish ? regionEnd : finish;
+    }
+    return true;
+}
+
 template <typename T>
 T Read(const void* p) {
     T value;
@@ -438,6 +457,53 @@ uint64_t HashProblem(int n, const float* lo, const float* hi, const int* dep) {
     return h ? h : 1;
 }
 
+bool ValidateLcpSolution(int n, const float* A, const float* b, const float* lo,
+                         const float* hi, const int* dep, const float* x) {
+    if (n <= 0 || !A || !b || !lo || !hi || !dep || !x) return false;
+    double maxUnboundedX = 0.0;
+    for (int i = 0; i < n; ++i) {
+        if (!std::isfinite(x[i]) || !std::isfinite(b[i]) ||
+            !std::isfinite(lo[i]) || !std::isfinite(hi[i])) return false;
+        if (dep[i] >= n) return false;
+        if (dep[i] < 0 && fabs(static_cast<double>(x[i])) > maxUnboundedX)
+            maxUnboundedX = fabs(static_cast<double>(x[i]));
+    }
+
+    for (int i = 0; i < n; ++i) {
+        if (dep[i] >= 0) {
+            const double scaledBound = fabs(static_cast<double>(hi[i]) * x[dep[i]]);
+            const double tolerance = 1.0e-3 * (1.0 + scaledBound + maxUnboundedX);
+            if (fabs(static_cast<double>(x[i])) > scaledBound + tolerance) return false;
+            continue;
+        }
+
+        double w = -static_cast<double>(b[i]);
+        for (int j = 0; j < n; ++j) {
+            const double a = A[static_cast<size_t>(i) * n + j];
+            if (!std::isfinite(a)) return false;
+            w += a * static_cast<double>(x[j]);
+        }
+        const double wTolerance = 1.0e-3 * (1.0 + fabs(static_cast<double>(b[i])));
+        const double lowerTolerance = 1.0e-5 * (1.0 + fabs(static_cast<double>(lo[i])));
+        const double upperTolerance = 1.0e-5 * (1.0 + fabs(static_cast<double>(hi[i])));
+        const double value = x[i];
+        if (value < static_cast<double>(lo[i]) - lowerTolerance ||
+            value > static_cast<double>(hi[i]) + upperTolerance) return false;
+
+        const bool atLower = value <= static_cast<double>(lo[i]) + lowerTolerance;
+        const bool atUpper = value >= static_cast<double>(hi[i]) - upperTolerance;
+        if (atLower && atUpper) continue;
+        if (atLower) {
+            if (w < -wTolerance) return false;
+        } else if (atUpper) {
+            if (w > wTolerance) return false;
+        } else if (fabs(w) > wTolerance) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool CacheLookup(uint64_t key, int n, std::vector<unsigned char>& out) {
     AcquireSRWLockShared(&g_cacheLock);
     bool found = false;
@@ -547,7 +613,7 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
     const size_t dependencyBytes = sizeof(int) * static_cast<size_t>(rows);
     const bool valid = Ad && bD && xD && loD && hiD && depD &&
                        IsReadableRange(Ad, matrixBytes) && IsReadableRange(bD, vectorBytes) &&
-                       IsReadableRange(xD, vectorBytes) && IsReadableRange(loD, vectorBytes) &&
+                       IsWritableRange(xD, vectorBytes) && IsReadableRange(loD, vectorBytes) &&
                        IsReadableRange(hiD, vectorBytes) && IsReadableRange(depD, dependencyBytes) &&
                        Read<int>(b + 4) == rows && Read<int>(x + 4) == rows &&
                        Read<int>(lo + 4) == rows && Read<int>(hi + 4) == rows &&
@@ -587,10 +653,10 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
     if (!ok && guess) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 0); }
     if (!ok) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 2); }
     if (!ok) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 8); }
-    if (ok) {
-        for (int i = 0; i < rows; ++i) {
-            if (!std::isfinite(xD[i])) { ok = false; break; }
-        }
+    bool validationFailed = false;
+    if (ok && !ValidateLcpSolution(rows, Ad, bD, loD, hiD, depD, xD)) {
+        ok = false;
+        validationFailed = true;
     }
     const LONGLONG dt = Now() - t0;
 
@@ -614,7 +680,8 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
             if (t_ours.size() == static_cast<size_t>(rows))
                 memcpy(xD, t_ours.data(), vectorBytes);
             InterlockedExchange(&g_runtimeDisabled, 1);
-            Log("VERIFY MISMATCH: restored vanilla solver output; FastPhysics disabled for this process");
+            Log("%s: restored vanilla solver output; FastPhysics disabled for this process",
+                validationFailed ? "LCP validation failed" : "VERIFY MISMATCH");
             EnterCriticalSection(&g_statsCs);
             ++g_stats.calls; ++g_stats.fallback;
             if (retried) ++g_stats.retries;
@@ -624,6 +691,10 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
         if (g_warmStart) CacheStore(key, rows, t_interior);
     } else if (!ok) {
         DumpFailure(rows, Ad, bD, loD, hiD, depD);
+        if (validationFailed) {
+            InterlockedExchange(&g_runtimeDisabled, 1);
+            Log("LCP validation failed: FastPhysics disabled for the rest of this process");
+        }
         EnterCriticalSection(&g_statsCs); ++g_stats.calls; ++g_stats.fallback; if (retried) ++g_stats.retries; LeaveCriticalSection(&g_statsCs);
         return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
     } else if (g_warmStart) {
