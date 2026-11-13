@@ -696,7 +696,7 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
         for (int i = 0; i < rows; ++i) {
             if (!std::isfinite(t_ours[i])) gameFinite = false;
             const double d = fabs(static_cast<double>(t_ours[i]) - static_cast<double>(xD[i]));
-            if (!std::isfinite(d)) maxDiff = INFINITY;
+            if (!std::isfinite(d)) maxDiff = DBL_MAX;
             else if (d > maxDiff) maxDiff = d;
             const double a = fabs(static_cast<double>(t_ours[i]));
             if (std::isfinite(a) && a > maxX) maxX = a;
