@@ -5,9 +5,13 @@ rem Requires Visual Studio 2022 with the "Desktop development with C++" workload
 setlocal
 cd /d "%~dp0"
 
-set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" (
+    echo Visual Studio installer locator was not found: "%VSWHERE%"
+    exit /b 1
+)
 set "VSDIR="
-for /f "delims=" %%i in ('vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath) do set "VSDIR=%%i"
+for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
 if not defined VSDIR (
     echo Visual Studio with C++ tools was not found.
     exit /b 1
