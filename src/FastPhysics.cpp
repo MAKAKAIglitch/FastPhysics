@@ -471,9 +471,8 @@ bool ValidateLcpSolution(int n, const float* A, const float* b, const float* lo,
 
     for (int i = 0; i < n; ++i) {
         if (dep[i] >= 0) {
-            const double scaledBound = fabs(static_cast<double>(hi[i]) * x[dep[i]]);
-            const double tolerance = 1.0e-3 * (1.0 + scaledBound + maxUnboundedX);
-            if (fabs(static_cast<double>(x[i])) > scaledBound + tolerance) return false;
+            const double scaledBound = fabs(static_cast<double>(hi[i])) * maxUnboundedX + 1.0e-3;
+            if (fabs(static_cast<double>(x[i])) > scaledBound) return false;
             continue;
         }
 
