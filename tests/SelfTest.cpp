@@ -194,6 +194,10 @@ void HookTests() {
 
 // --- patch helper -------------------------------------------------------------------------------
 void PatchHelperTests() {
+    const std::string validHash(64, 'a');
+    Check(IsSha256Hex(validHash.c_str()), "64-character hexadecimal executable pin is accepted");
+    Check(!IsSha256Hex("not-a-sha256"), "malformed executable pin is rejected");
+
     printf("Masked signature scanner:\n");
     uint8_t sample[] = {
         0x48, 0x8B, 0x47, 0x18, 0x74, 0x21, 0x90,
