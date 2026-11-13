@@ -404,12 +404,31 @@ void DiagnoseNavMeshSignature() {
 
 int g_probeSweepRadius = 8, g_navMeshFix = 1;
 
+int NormalizeProbeSweepRadius(int value) {
+    return value > 0 && value < 32 ? value : 0;
+}
+
+int NormalizeNavMeshFix(int value) {
+    return value == 1 ? 1 : 0;
+}
+
 void PatchProbeSweep() {
-    if (g_probeSweepRadius <= 0 || g_probeSweepRadius >= 32) return;
+    if (g_probeSweepRadius == 0) {
+        Log("probe sweep: disabled by FastPhysics.ini");
+        return;
+    }
+    if (g_probeSweepRadius < 0 || g_probeSweepRadius >= 32) {
+        Log("probe sweep: invalid radius %d; patch left unchanged", g_probeSweepRadius);
+        return;
+    }
     uint8_t* at = FindUnique(g_text, kProbeSweepSig, sizeof kProbeSweepSig);
     if (!at) {
         Log("probe sweep: exact signature not found or not unique; patch left unchanged");
         DiagnoseProbeSweepSignature();
+        return;
+    }
+    if (Read<uint32_t>(at + 10) != 0x42000000 || Read<uint32_t>(at + 18) != 0x42000000) {
+        Log("probe sweep: signature found but expected 32.0 m radius anchors differ; patch left unchanged");
         return;
     }
     float r = static_cast<float>(g_probeSweepRadius);
@@ -427,15 +446,28 @@ void PatchProbeSweep() {
 }
 
 void PatchNavMesh() {
-    if (!g_navMeshFix) return;
+    if (!g_navMeshFix) {
+        Log("navmesh fix: disabled by FastPhysics.ini");
+        return;
+    }
     uint8_t* at = FindUnique(g_text, kNavMeshSig, sizeof kNavMeshSig);
     if (!at) {
         Log("navmesh fix: exact signature not found or not unique; patch left unchanged");
         DiagnoseNavMeshSignature();
         return;
     }
-    const uint8_t jmp[] = {0xEB, 0x3C};   // where the je in the signature lands: past the walk and the assert
-    if (WriteProtected(at, jmp, sizeof jmp)) Log("navmesh static-box registration: duplicate search skipped");
+    const uint8_t expectedStart[] = {0x48, 0x8B, 0x47, 0x18};
+    if (memcmp(at, expectedStart, sizeof(expectedStart)) != 0 ||
+        static_cast<size_t>(g_text.end - at) <= 2u + 0x3Cu) {
+        Log("navmesh fix: code anchor or jump destination is outside the validated text range; patch left unchanged");
+        return;
+    }
+    const uint8_t jmp[] = {0xEB, 0x3C};   // skip the duplicate walk and its debug assertion
+    if (WriteProtected(at, jmp, sizeof jmp)) {
+        Log("navmesh static-box registration: duplicate search skipped");
+    } else {
+        Log("navmesh fix: protected write failed; game code left unchanged");
+    }
 }
 
 LARGE_INTEGER g_freq;
@@ -790,11 +822,17 @@ void Init(HMODULE self) {
         g_logInterval = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"LogIntervalSeconds", 5, ini));
         if (g_logInterval < 1) g_logInterval = 1;
         g_dumpFailures = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"DumpFailures", 0, ini));
-        // This diagnostic build never applies the two optional executable-code patches,
-        // even when an older user FastPhysics.ini still contains ProbeSweepRadius=8/NavMeshFix=1.
-        g_probeSweepRadius = 0;
-        g_navMeshFix = 0;
-        g_diagnoseSignatures = 1;
+        const int requestedProbeSweepRadius = static_cast<int>(
+            GetPrivateProfileIntW(L"FastPhysics", L"ProbeSweepRadius", 8, ini));
+        const int requestedNavMeshFix = static_cast<int>(
+            GetPrivateProfileIntW(L"FastPhysics", L"NavMeshFix", 1, ini));
+        g_probeSweepRadius = NormalizeProbeSweepRadius(requestedProbeSweepRadius);
+        g_navMeshFix = NormalizeNavMeshFix(requestedNavMeshFix);
+        g_diagnoseSignatures = GetPrivateProfileIntW(L"FastPhysics", L"DiagnoseSignatures", 1, ini) != 0 ? 1 : 0;
+        if (requestedProbeSweepRadius != 0 && g_probeSweepRadius == 0)
+            Log("invalid ProbeSweepRadius=%d; feature disabled (valid values: 0 or 1..31)", requestedProbeSweepRadius);
+        if (requestedNavMeshFix != 0 && g_navMeshFix == 0)
+            Log("invalid NavMeshFix=%d; feature disabled (valid values: 0 or 1)", requestedNavMeshFix);
         int tolerancePpm = GetPrivateProfileIntW(L"FastPhysics", L"VerifyTolerancePPM", 1000, ini);
         if (tolerancePpm < 0 || tolerancePpm > 5000) tolerancePpm = 1000;
         g_verifyTolerance = tolerancePpm / 1000000.0;
@@ -807,7 +845,8 @@ void Init(HMODULE self) {
     g_verifyLeft = g_verify;
     Log("FastPhysics %s loaded (enabled %d, warm start %d, verify %d, min rows %d, probe sweep radius %d, navmesh fix %d)",
         FP_VERSION_STRING, g_enabled, g_warmStart, g_verify, g_minRows, g_probeSweepRadius, g_navMeshFix);
-    Log("diagnostic safety profile: optional probe/navmesh patches forced off; exact game executable SHA-256 pin required");
+    Log("optional patches: probe radius %d m, navmesh fix %d; each requires an exact unique signature and matching EXE SHA-256",
+        g_probeSweepRadius, g_navMeshFix);
     if (!g_enabled) return;
     char actualHash[65] = {};
     wchar_t exePath[MAX_PATH] = {};
