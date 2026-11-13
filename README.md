@@ -43,6 +43,18 @@ Not physics, but found with the same profiler and easier to ship in one mod:
 Both are byte signatures that must match exactly once; otherwise the DLL leaves the code alone and says so in
 the log. Both apply even on CPUs without AVX2 (the solver part then stays off).
 
+## Experimental Scrap Mechanic 1.0.7 diagnostic build
+
+Branch `test/scrap-mechanic-1.0.7-signature-diagnostics` produces the separate package
+`FastPhysics-1.2.0-sm107-test1.zip`. It keeps the normal exact-and-unique checks for both optional
+machine-code patches. If an exact signature does not match, the DLL reports exact and relaxed
+candidate counts plus up to 64 bytes from each candidate location in `FastPhysics.log`.
+
+Relaxed patterns are diagnostic only: they are never used to write into game memory. The physics
+solver hook remains independent of these optional patches. The self-test reports missing optional
+signatures as informational on 1.0.7 while still requiring the solver RTTI/vtable checks to pass.
+This is an experimental diagnostic build, not a release claiming full 1.0.7 compatibility.
+
 ## Layout
 
 - `src/FastPhysics.cpp` - the DLL: hook, settings, warm-start cache, stats, log
