@@ -231,6 +231,12 @@ void PatchHelperTests() {
               "original page protection is restored");
         Check(IsReadableRange(page, sizeof(before)), "readable-range guard accepts committed read-only memory");
         Check(!IsWritableRange(page, sizeof(before)), "writable-range guard rejects read-only memory");
+        void* slot = page;
+        void* replacement = page + 16;
+        void* original = nullptr;
+        const bool swapped = PatchPointer(&slot, replacement, &original);
+        Check(swapped && slot == replacement && original == page,
+              "vtable pointer patch uses an atomic exchange and preserves the original target");
     }
     VirtualFree(page, 0, MEM_RELEASE);
 }
