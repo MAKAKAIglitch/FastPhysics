@@ -3,5 +3,5 @@
 // Single source of the mod version: used by the DLL, its version resource and package.ps1.
 #define FP_VERSION_MAJOR 1
 #define FP_VERSION_MINOR 2
-#define FP_VERSION_PATCH 0
-#define FP_VERSION_STRING "1.2.0-sm107-test1"
+#define FP_VERSION_PATCH 7
+#define FP_VERSION_STRING "1.2.7"
