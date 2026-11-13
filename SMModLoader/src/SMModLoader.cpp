@@ -117,12 +117,14 @@ void Init(HMODULE self) {
 
     wchar_t mutexName[64];
     swprintf(mutexName, 64, L"Local\\SM.ModLoader.%lu", GetCurrentProcessId());
+    SetLastError(ERROR_SUCCESS);
     HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName);
+    const DWORD mutexError = GetLastError();
     if (!mutex) {
         OutputDebugStringW(L"SM Mod Loader: failed to create the process mutex");
         return;
     }
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (mutexError == ERROR_ALREADY_EXISTS) {
         CloseHandle(mutex);
         return;
     }
