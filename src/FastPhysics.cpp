@@ -680,16 +680,29 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
     }
     const LONGLONG dt = Now() - t0;
 
+    // Another worker may have detected a mismatch while this call was solving.
+    // Do not let an in-flight FastPhysics result escape after the session circuit-breaker trips.
+    if (InterlockedCompareExchange(&g_runtimeDisabled, 0, 0) != 0) {
+        if (verifyNow && t_ours.size() == static_cast<size_t>(rows)) {
+            memcpy(xD, t_ours.data(), vectorBytes);
+            return okOrig;
+        }
+        return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
+    }
+
     if (verifyNow) {
         double maxDiff = 0.0, maxX = 0.0;
+        bool gameFinite = true;
         for (int i = 0; i < rows; ++i) {
+            if (!std::isfinite(t_ours[i])) gameFinite = false;
             const double d = fabs(static_cast<double>(t_ours[i]) - static_cast<double>(xD[i]));
-            if (d > maxDiff) maxDiff = d;
+            if (!std::isfinite(d)) maxDiff = INFINITY;
+            else if (d > maxDiff) maxDiff = d;
             const double a = fabs(static_cast<double>(t_ours[i]));
-            if (a > maxX) maxX = a;
+            if (std::isfinite(a) && a > maxX) maxX = a;
         }
         const double tolerance = 1.0e-5 + g_verifyTolerance * (1.0 + maxX);
-        const bool agree = okOrig && ok && maxDiff <= tolerance;
+        const bool agree = okOrig && gameFinite && ok && maxDiff <= tolerance;
         Log("verify: %d rows | fast %.3f ms (ok %d%s), game %.3f ms (ok %d) | maxDiff %.6g, tolerance %.6g, warm start %s",
             rows, Ms(dt), ok ? 1 : 0, retried ? ", cold retry" : "", Ms(tOrig), okOrig ? 1 : 0,
             maxDiff, tolerance, hit ? "hit" : "miss");
