@@ -179,7 +179,7 @@ int CountPattern(const Range& r, const uint8_t* pattern, const uint8_t* mask, si
         }
         if (!match) continue;
         if (found && count < capacity) found[count] = p;
-        if (count < INT_MAX) ++count;
+        ++count;
     }
     return count;
 }
@@ -208,6 +208,28 @@ void LogPatternCandidates(const char* label, const uint8_t* pattern, const uint8
     for (int i = 0; i < count && i < 3; ++i) LogPatternCandidate(label, i + 1, found[i]);
 }
 
+
+// ---------------------------------------------------------------------------
+// Two small fixes for big static builds. They have nothing to do with the solver, they just live here
+// because one mod is easier to install than three.
+//
+//  - Reflection probes: every frame the camera moves, the probe generator finds the ground height under it
+//    by sweeping a 32 m sphere 250 m down through the physics world. Next to a build of tens of thousands of
+//    parts that one query costs 40-50 ms. A smaller sphere samples a narrower column and costs a few ms;
+//    the probes end up anchored to the ground right under the camera instead of the highest surface within
+//    32 m. ProbeSweepRadius is the radius in metres, 0 keeps the game's value.
+//  - Bot navmesh: when a cell's static boxes are registered, every box walks the cell's whole box list to
+//    check that its id is not there yet. The result only feeds a debug assert, and the walk is quadratic in
+//    the boxes per cell. NavMeshFix jumps over it.
+//
+// Both sites are found by a byte signature that must match exactly once; otherwise nothing is changed.
+// ---------------------------------------------------------------------------
+// xorps xmm0,xmm0 ; movaps [rbp],xmm0 ; mov dword ptr [rbp],32.0f ; mov qword ptr [rbp+0x10],32.0f
+const uint8_t kProbeSweepSig[] = {0x0F, 0x57, 0xC0, 0x0F, 0x29, 0x45, 0x00, 0xC7, 0x45, 0x00, 0x00, 0x00, 0x00, 0x42,
+                                  0x48, 0xC7, 0x45, 0x10, 0x00, 0x00, 0x00, 0x42};
+// mov rax,[rdi+18] ; mov rcx,[rdi+20] ; cmp rax,rcx ; je +31 ; mov rdx,[rbx] ; nop ; cmp [rax],rdx ; je +9 ; add rax,28 ; cmp rax,rcx ; jne -e
+const uint8_t kNavMeshSig[] = {0x48, 0x8B, 0x47, 0x18, 0x48, 0x8B, 0x4F, 0x20, 0x48, 0x3B, 0xC1, 0x74, 0x31, 0x48, 0x8B, 0x13,
+                               0x66, 0x90, 0x48, 0x39, 0x10, 0x74, 0x09, 0x48, 0x83, 0xC0, 0x28, 0x48, 0x3B, 0xC1, 0x75, 0xF2};
 void DiagnoseProbeSweepSignature() {
     std::vector<uint8_t> relaxedMask(sizeof(kProbeSweepSig), 0xFF);
     // The two ModRM displacement bytes depend on the compiler's stack layout.
@@ -245,27 +267,6 @@ void DiagnoseNavMeshSignature() {
     LogPatternCandidates("navmesh loop-tail anchor", loopTail, nullptr, sizeof(loopTail));
 }
 
-// ---------------------------------------------------------------------------
-// Two small fixes for big static builds. They have nothing to do with the solver, they just live here
-// because one mod is easier to install than three.
-//
-//  - Reflection probes: every frame the camera moves, the probe generator finds the ground height under it
-//    by sweeping a 32 m sphere 250 m down through the physics world. Next to a build of tens of thousands of
-//    parts that one query costs 40-50 ms. A smaller sphere samples a narrower column and costs a few ms;
-//    the probes end up anchored to the ground right under the camera instead of the highest surface within
-//    32 m. ProbeSweepRadius is the radius in metres, 0 keeps the game's value.
-//  - Bot navmesh: when a cell's static boxes are registered, every box walks the cell's whole box list to
-//    check that its id is not there yet. The result only feeds a debug assert, and the walk is quadratic in
-//    the boxes per cell. NavMeshFix jumps over it.
-//
-// Both sites are found by a byte signature that must match exactly once; otherwise nothing is changed.
-// ---------------------------------------------------------------------------
-// xorps xmm0,xmm0 ; movaps [rbp],xmm0 ; mov dword ptr [rbp],32.0f ; mov qword ptr [rbp+0x10],32.0f
-const uint8_t kProbeSweepSig[] = {0x0F, 0x57, 0xC0, 0x0F, 0x29, 0x45, 0x00, 0xC7, 0x45, 0x00, 0x00, 0x00, 0x00, 0x42,
-                                  0x48, 0xC7, 0x45, 0x10, 0x00, 0x00, 0x00, 0x42};
-// mov rax,[rdi+18] ; mov rcx,[rdi+20] ; cmp rax,rcx ; je +31 ; mov rdx,[rbx] ; nop ; cmp [rax],rdx ; je +9 ; add rax,28 ; cmp rax,rcx ; jne -e
-const uint8_t kNavMeshSig[] = {0x48, 0x8B, 0x47, 0x18, 0x48, 0x8B, 0x4F, 0x20, 0x48, 0x3B, 0xC1, 0x74, 0x31, 0x48, 0x8B, 0x13,
-                               0x66, 0x90, 0x48, 0x39, 0x10, 0x74, 0x09, 0x48, 0x83, 0xC0, 0x28, 0x48, 0x3B, 0xC1, 0x75, 0xF2};
 int g_probeSweepRadius = 8, g_navMeshFix = 1;
 
 void PatchProbeSweep() {
