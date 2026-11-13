@@ -58,14 +58,15 @@ the log. Both apply even on CPUs without AVX2 (the solver part then stays off).
 Visual Studio 2022 with the C++ workload (`build.bat` finds it through vswhere).
 
 ```
-build.bat                 builds bin\FastPhysics.dll and build\SelfTest.exe
-build\SelfTest.exe        needs the game installed; pass the path to ScrapMechanic.exe if it is not in the default Steam folder
-release.bat               builds the loader and the mod, runs the self-test, packs dist\
+build.bat                         builds bin\FastPhysics.dll and build\SelfTest.exe
+build\SelfTest.exe --solver-only  runs solver, hook and protected-write tests without the game installed
+build\SelfTest.exe [game.exe]     also checks the target game image and byte signatures
+release.bat                       builds, tests the loader, runs the full self-test and packs dist\
 ```
 
-The DLL needs AVX2 and FMA at run time. Without them it logs that and stays inactive.
-
-The DLL imports nothing but KERNEL32. It does not touch the network, your saves or any game file.
+Only `src/fastlcp.cpp` is compiled with `/arch:AVX2`. The host code and CPU feature check are built for baseline x64,
+so systems without AVX2/FMA are rejected before entering the optimized kernels. The self-test exits before executing
+AVX2 tests when the processor or OS lacks AVX2/FMA.
 
 ## Settings
 
@@ -76,3 +77,14 @@ The DLL imports nothing but KERNEL32. It does not touch the network, your saves 
 
 zlib (see `LICENSE`). `src/fastlcp.cpp` is derived from Bullet Physics' `btDantzigLCP.cpp` (zlib), which is a port
 of the Open Dynamics Engine LCP solver (BSD / LGPL dual licence); the file keeps the original notices.
+
+
+## MAKAKAIglitch hardening fork
+
+This is a community-maintained hardening fork of [drake1ch/FastPhysics](https://github.com/drake1ch/FastPhysics).
+It keeps the original project attribution and zlib licence. The Bullet/ODE-derived solver notices in
+`src/fastlcp.cpp` are retained. Changes in this fork are documented in [docs/HARDENING.md](docs/HARDENING.md).
+
+This fork is not an upstream release and its binaries are not certified malware-free. Review the source and scan
+release artifacts before installing them. Windows CI builds and exercises the loader, solver and packaging checks;
+the full game-image compatibility test still requires the installed Scrap Mechanic executable.

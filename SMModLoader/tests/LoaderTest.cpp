@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <string>
 
 namespace {
@@ -52,11 +53,32 @@ int Child() {
     wchar_t dir[MAX_PATH];
     GetModuleFileNameW(nullptr, dir, MAX_PATH);
     wcscpy_s(wcsrchr(dir, L'\\') + 1, 32, L"SMModLoader.dll");
+
+    wchar_t eventName[96];
+    swprintf(eventName, 96, L"Local\\SM.ModLoader.InitDone.%lu", GetCurrentProcessId());
+    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, eventName);
+    if (!done) return 4;
+
     HMODULE loader = LoadLibraryW(dir);
-    if (!loader) return 2;
+    if (!loader) { CloseHandle(done); return 2; }
+    if (WaitForSingleObject(done, 10000) != WAIT_OBJECT_0) {
+        FreeLibrary(loader);
+        CloseHandle(done);
+        return 5;
+    }
+
     FreeLibrary(loader);
+    ResetEvent(done);
     loader = LoadLibraryW(dir);
-    return loader ? 0 : 3;
+    if (!loader) { CloseHandle(done); return 3; }
+    if (WaitForSingleObject(done, 10000) != WAIT_OBJECT_0) {
+        FreeLibrary(loader);
+        CloseHandle(done);
+        return 6;
+    }
+    FreeLibrary(loader);
+    CloseHandle(done);
+    return 0;
 }
 
 }  // namespace

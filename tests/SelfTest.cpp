@@ -185,6 +185,32 @@ void HookTests() {
     g_enabled = 1;
 }
 
+// --- patch helper -------------------------------------------------------------------------------
+void PatchHelperTests() {
+    printf("Memory patch helper:\n");
+    SYSTEM_INFO info = {};
+    GetSystemInfo(&info);
+    auto page = static_cast<uint8_t*>(VirtualAlloc(nullptr, info.dwPageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    Check(page != nullptr, "test page allocated");
+    if (!page) return;
+
+    const uint8_t before[] = {0x10, 0x20, 0x30, 0x40};
+    const uint8_t after[] = {0xAA, 0xBB, 0xCC, 0xDD};
+    memcpy(page, before, sizeof(before));
+    DWORD oldProtect = 0;
+    const BOOL madeReadOnly = VirtualProtect(page, info.dwPageSize, PAGE_READONLY, &oldProtect);
+    Check(madeReadOnly != 0, "test page made read-only");
+    if (madeReadOnly) {
+        const bool patched = WriteProtected(page, after, sizeof(after));
+        Check(patched && memcmp(page, after, sizeof(after)) == 0, "protected write updates bytes");
+        MEMORY_BASIC_INFORMATION mbi = {};
+        const SIZE_T queried = VirtualQuery(page, &mbi, sizeof(mbi));
+        Check(queried == sizeof(mbi) && (mbi.Protect & 0xFF) == PAGE_READONLY,
+              "original page protection is restored");
+    }
+    VirtualFree(page, 0, MEM_RELEASE);
+}
+
 // --- 1) the game image ----------------------------------------------------------------------------
 void ImageTests(const wchar_t* exePath) {
     printf("ScrapMechanic.exe image:\n");
@@ -210,13 +236,22 @@ void ImageTests(const wchar_t* exePath) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    const bool solverOnly = argc > 1 && strcmp(argv[1], "--solver-only") == 0;
     wchar_t exePath[MAX_PATH] = L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Scrap Mechanic\\Release\\ScrapMechanic.exe";
-    if (argc > 1) MultiByteToWideChar(CP_ACP, 0, argv[1], -1, exePath, MAX_PATH);
+    if (argc > 1 && !solverOnly) MultiByteToWideChar(CP_ACP, 0, argv[1], -1, exePath, MAX_PATH);
     printf("FastPhysics %s self-test\n", FP_VERSION_STRING);
-    Check(CpuSupportsAvx2Fma(), "this CPU has AVX2 and FMA (needed by the solver kernels)");
-    ImageTests(exePath);
+
+    const bool cpuSupported = CpuSupportsAvx2Fma();
+    Check(cpuSupported, "this CPU has AVX2 and FMA (needed by the solver kernels)");
+    if (!cpuSupported) {
+        printf("\nAVX2/FMA unavailable: solver tests were not executed.\n");
+        return 1;
+    }
+
+    if (!solverOnly) ImageTests(exePath);
     SolverTests();
     HookTests();
+    PatchHelperTests();
     printf(g_failures ? "\n%d check(s) FAILED\n" : "\nAll checks passed\n", g_failures);
     return g_failures ? 1 : 0;
 }

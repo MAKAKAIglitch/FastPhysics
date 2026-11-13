@@ -117,8 +117,17 @@ void Init(HMODULE self) {
 
     wchar_t mutexName[64];
     swprintf(mutexName, 64, L"Local\\SM.ModLoader.%lu", GetCurrentProcessId());
-    CreateMutexW(nullptr, FALSE, mutexName);
-    if (GetLastError() == ERROR_ALREADY_EXISTS) return;  // another copy already loaded the mods
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName);
+    if (!mutex) {
+        OutputDebugStringW(L"SM Mod Loader: failed to create the process mutex");
+        return;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(mutex);
+        return;
+    }
+    // Intentionally keep the first handle open until process exit. It prevents a
+    // later DLL reload from loading the same mod set a second time.
 
     OpenLog(self);
     Log("SM Mod Loader %s", SMML_VERSION_STRING);
@@ -129,12 +138,28 @@ void Init(HMODULE self) {
     }
 }
 
+DWORD WINAPI InitializationThread(LPVOID context) {
+    Init(static_cast<HMODULE>(context));
+
+    wchar_t eventName[96];
+    swprintf(eventName, 96, L"Local\\SM.ModLoader.InitDone.%lu", GetCurrentProcessId());
+    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, eventName);
+    if (done) {
+        SetEvent(done);
+        CloseHandle(done);
+    }
+    return 0;
+}
+
 }  // namespace
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(module);
-        Init(module);
+        // No nested LoadLibraryEx or file work under the loader lock; do not wait here.
+        // Thread notifications remain enabled for the static CRT (/MT) and TLS.
+        HANDLE worker = CreateThread(nullptr, 0, InitializationThread, module, 0, nullptr);
+        if (worker) CloseHandle(worker);
+        else OutputDebugStringW(L"SM Mod Loader: failed to create initialization worker");
     }
     return TRUE;
 }

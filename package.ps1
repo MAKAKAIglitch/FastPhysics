@@ -52,6 +52,7 @@ $main = [ordered]@{
     'FastPhysics\Install.bat'            = Join-Path $installer 'Install.bat'
     'FastPhysics\Uninstall.bat'          = Join-Path $installer 'Uninstall.bat'
     'FastPhysics\README.txt'             = Join-Path $installer 'README.txt'
+    'FastPhysics\LICENSE'                 = Join-Path $root 'LICENSE'
     'FastPhysics\files\FastPhysics.dll'  = $dll
     'FastPhysics\files\FastPhysics.ini'  = Join-Path $installer 'files\FastPhysics.ini'
     'FastPhysics\files\SMModLoader.dll'  = $loaderDll
@@ -70,7 +71,8 @@ if (Test-Path $unpacked) { Remove-Item $unpacked -Recurse -Force }
 
 # --- Source package
 $sourceFiles = @(
-    'README.md', 'build.bat', 'release.bat', 'package.ps1',
+    'README.md', 'LICENSE', 'build.bat', 'release.bat', 'package.ps1',
+    'docs\HARDENING.md', 'tests\VerifySourcePackage.ps1',
     'src\FastPhysics.cpp', 'src\FastPhysics.rc', 'src\version.h',
     'src\fastlcp.cpp', 'src\fastlcp.h', 'src\lcpkernels.h',
     'tests\SelfTest.cpp',

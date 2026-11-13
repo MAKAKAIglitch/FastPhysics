@@ -12,6 +12,11 @@ call "%~dp0build.bat"
 if errorlevel 1 exit /b 1
 
 echo.
+echo Running the mod-loader integration test...
+"%LOADER%\build\LoaderTest.exe" "%LOADER%\bin\SMModLoader.dll" "%LOADER%\build\TestMod.dll"
+if errorlevel 1 exit /b 1
+
+echo.
 echo Running the self-test...
 "%~dp0build\SelfTest.exe" %*
 if errorlevel 1 (
