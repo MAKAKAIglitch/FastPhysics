@@ -783,7 +783,9 @@ void Init(HMODULE self) {
         g_probeSweepRadius = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"ProbeSweepRadius", 8, ini));
         g_navMeshFix = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"NavMeshFix", 1, ini));
         g_diagnoseSignatures = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"DiagnoseSignatures", 1, ini));
-        g_verifyTolerance = GetPrivateProfileIntW(L"FastPhysics", L"VerifyTolerancePPM", 1000, ini) / 1000000.0;
+        int tolerancePpm = GetPrivateProfileIntW(L"FastPhysics", L"VerifyTolerancePPM", 1000, ini);
+        if (tolerancePpm < 0 || tolerancePpm > 5000) tolerancePpm = 1000;
+        g_verifyTolerance = tolerancePpm / 1000000.0;
         GetPrivateProfileStringW(L"FastPhysics", L"ExpectedGameExeSHA256", L"", expectedHashW,
                                  static_cast<DWORD>(sizeof(expectedHashW) / sizeof(expectedHashW[0])), ini);
     }
