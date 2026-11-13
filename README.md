@@ -53,7 +53,7 @@ Branch `test/scrap-mechanic-1.0.7-signature-diagnostics` produces the separate p
 From the repository root on Windows with Visual Studio 2022 C++ tools installed:
 
 ```bat
-release.bat "D:\\SteamLibrary\\steamapps\\common\\Scrap Mechanic\\Release\\ScrapMechanic.exe"
+release.bat "D:\SteamLibrary\steamapps\common\Scrap Mechanic\Release\ScrapMechanic.exe"
 ```
 
 The build runs the local installer/source checks, builds both DLLs and the self-test, tests the target
