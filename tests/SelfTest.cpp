@@ -182,6 +182,20 @@ void HookTests() {
     Check(ok && g_origCalls == 0 && Violations(p, x.data()) == 0, "a valid problem is solved by the fast solver, the game's is not called");
     bool ok2 = call();
     Check(ok2 && g_stats.cacheHits == 1 && Violations(p, x.data()) == 0, "the second tick of the same creation uses the warm start");
+
+    // Force a known disagreement: the test original returns -1 for every row.
+    // Verification must restore that exact vanilla output and trip the process circuit-breaker.
+    g_origCalls = 0;
+    g_runtimeDisabled = 0;
+    g_verifyLeft = 1;
+    std::fill(x.begin(), x.end(), 0.0f);
+    const bool verified = call();
+    Check(verified && g_origCalls == 1 && x[0] == -1.0f && g_runtimeDisabled != 0,
+          "verification mismatch restores vanilla output and disables FastPhysics");
+    g_runtimeDisabled = 0;
+    g_verifyLeft = 0;
+    g_origCalls = 0;
+
     A.size = p.n * p.n - 1;   // layout mismatch -> the game's solver
     call();
     Check(g_origCalls == 1 && x[0] == -1.0f, "an unexpected matrix layout goes to the game's solver untouched");
