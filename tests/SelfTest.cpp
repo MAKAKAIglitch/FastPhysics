@@ -212,6 +212,16 @@ void PatchHelperTests() {
     Check(IsSha256Hex(validHash.c_str()), "64-character hexadecimal executable pin is accepted");
     Check(!IsSha256Hex("not-a-sha256"), "malformed executable pin is rejected");
 
+    Check(NormalizeProbeSweepRadius(0) == 0 &&
+          NormalizeProbeSweepRadius(8) == 8 &&
+          NormalizeProbeSweepRadius(31) == 31 &&
+          NormalizeProbeSweepRadius(32) == 0 &&
+          NormalizeProbeSweepRadius(-1) == 0,
+          "probe sweep accepts 0 or a radius from 1 to 31 and rejects invalid values");
+    Check(NormalizeNavMeshFix(0) == 0 && NormalizeNavMeshFix(1) == 1 &&
+          NormalizeNavMeshFix(2) == 0 && NormalizeNavMeshFix(-1) == 0,
+          "navmesh patch accepts only explicit 0/1 settings");
+
     printf("Masked signature scanner:\n");
     uint8_t sample[] = {
         0x48, 0x8B, 0x47, 0x18, 0x74, 0x21, 0x90,
@@ -227,7 +237,18 @@ void PatchHelperTests() {
     Check(maskedCount == 2 && matches[0] == sample && matches[1] == sample + 7,
           "masked scanner locates both candidates without changing memory");
 
-    printf("Memory patch helper:\n");
+    const uint8_t uniqueSig[] = {0x48, 0x8B, 0x47, 0x18, 0x74, 0x21};
+    Check(FindUnique(sampleRange, uniqueSig, sizeof(uniqueSig)) == sample,
+          "exact unique-signature helper accepts one exact match");
+    uint8_t duplicateSample[] = {
+        0x48, 0x8B, 0x47, 0x18, 0x74, 0x21, 0x90,
+        0x48, 0x8B, 0x47, 0x18, 0x74, 0x21
+    };
+    Range duplicateRange{duplicateSample, duplicateSample + sizeof(duplicateSample)};
+    Check(FindUnique(duplicateRange, uniqueSig, sizeof(uniqueSig)) == nullptr,
+          "exact unique-signature helper rejects duplicate matches without selecting either");
+
+    printf("Memory patch helper:\\n");
     SYSTEM_INFO info = {};
     GetSystemInfo(&info);
     auto page = static_cast<uint8_t*>(VirtualAlloc(nullptr, info.dwPageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
