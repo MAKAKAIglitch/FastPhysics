@@ -243,7 +243,7 @@ void ImageTests(const wchar_t* exePath) {
     char exeHash[65] = {};
     const bool hashOk = HashFileSha256(exePath, exeHash);
     Check(hashOk, "game executable SHA-256 can be calculated");
-    if (hashOk) printf("ScrapMechanic.exe SHA-256: %s\\n", exeHash);
+    if (hashOk) printf("ScrapMechanic.exe SHA-256: %s\n", exeHash);
     Check(InitSections(reinterpret_cast<uint8_t*>(exe)), ".text/.rdata/.data sections found");
     void** vt = FindVTable(".?AVbtDantzigSolver@@");
     Check(vt != nullptr && g_rdata.Contains(vt), "btDantzigSolver vtable found through RTTI");
