@@ -25,6 +25,15 @@ patching or nested `LoadLibraryExW` calls while the Windows loader lock is held.
 The loader test waits for its worker-completion event before unloading the test DLL. The process-scoped mutex handle
 is checked and retained for the process lifetime so reloading the loader does not load the same mod set twice.
 
+The loader resolves each mod by its full path with
+`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32`.
+This limits dependency lookup to the mod directory, game directory and System32; the current directory and PATH are
+not searched. This requires Windows 8 or newer (the game's documented target is Windows 10/11).
+
+The loader remains a plugin host, not a trust scanner: every DLL intentionally placed in
+`Release\\DLLModules` is executed in the game process with the game's permissions. Third-party mods in that
+directory must be independently trusted and checked.
+
 ### CPU dispatch
 
 Only `src/fastlcp.cpp` is compiled with `/arch:AVX2`. The DLL host/dispatch source is built for baseline x64 and
@@ -54,7 +63,8 @@ The installer no longer explicitly calls `Unblock-File`.
 - The player and source archives include the original `LICENSE`.
 - `release.bat` runs the mod-loader integration test.
 - `SelfTest.exe --solver-only` supports CI without distributing the proprietary game executable.
-- Windows CI builds both DLLs, runs loader/solver/patch-helper tests, and verifies source archive contents.
+- Windows CI builds both DLLs, runs loader/solver/patch-helper and installer-backup tests, and verifies source archive contents.
+- On a successful run, CI uploads the two DLLs and both ZIP packages with a SHA-256 manifest for independent scanning.
 
 ## Verification limits
 
