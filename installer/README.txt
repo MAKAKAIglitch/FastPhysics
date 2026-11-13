@@ -85,10 +85,13 @@ preserves the files for inspection. Do not bypass that check.
 
 REQUIREMENTS
 ------------
-- Scrap Mechanic 1.0 (Steam, 64-bit). Tested with 1.0.6.
-- A CPU with AVX2 and FMA (any Intel from 2013 / AMD from 2015 on). On
-  an older CPU the mod stays inactive and the game runs as without it
-  (FastPhysics.log says so).
+- Scrap Mechanic 1.0.7 (Steam, 64-bit) for this experimental test build.
+  The main solver hook is not enabled until ExpectedGameExeSHA256 in
+  FastPhysics.ini exactly matches the running ScrapMechanic.exe.
+  An empty or different hash means diagnostic-only mode: no game-code
+  patch and no physics hook. A game update therefore disables the mod
+  automatically until that exact executable has been rechecked.
+- A CPU with AVX2 and FMA. Without them the mod stays inactive.
 - Windows 10 or 11.
 
 
@@ -102,13 +105,23 @@ Release\DLLModules\FastPhysics.ini (changes apply on the next start):
                         same). 0 solves every tick from scratch; it is
                         slower, there is no reason to change it.
   LogIntervalSeconds=30 How often a statistics line goes to the log.
-  ProbeSweepRadius=8    Radius of the reflection-probe placement sweep
-                        in metres (the game uses 32). 0 keeps the
-                        game's value.
-  NavMeshFix=1          0 leaves the navmesh registration as it is.
+  ExpectedGameExeSHA256  Exact 64-character SHA-256 of the game EXE.
+                        Blank/mismatch = no hook or game-code patches.
+  DiagnoseSignatures=1   Logs exact and relaxed signature candidates;
+                        relaxed matches are never patched.
+  ProbeSweepRadius=0     Leave the game's reflection-probe code unchanged.
+  NavMeshFix=0           Leave the game's NavMesh code unchanged.
+  Verify=512             Compare the first 512 fast solves with the
+                         vanilla solver. A mismatch restores the vanilla
+                         output and disables FastPhysics for that process.
+  VerifyTolerancePPM=1000  Maximum 0.1% relative solver-result difference.
 
-Troubleshooting settings (Verify, MinRows, DumpFailures) are described
-in the ini file itself.
+FastPhysics also checks each optimized result against LCP bounds and
+complementarity conditions. If validation fails, it falls back to the
+vanilla solver and disables the fast path for the process.
+
+The first 512 calls run both solvers and are slower. Measure performance
+only after those verification calls have completed without mismatches.
 
 
 FAQ
