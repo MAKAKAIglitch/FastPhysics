@@ -202,7 +202,7 @@ void PatchHelperTests() {
     Check(maskedCount == 2 && matches[0] == sample && matches[1] == sample + 7,
           "masked scanner locates both candidates without changing memory");
 
-    printf("Memory patch helper:\\n");
+    printf("Memory patch helper:\n");
     SYSTEM_INFO info = {};
     GetSystemInfo(&info);
     auto page = static_cast<uint8_t*>(VirtualAlloc(nullptr, info.dwPageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
@@ -249,7 +249,7 @@ void ImageTests(const wchar_t* exePath) {
         Check(sweep != nullptr, "reflection probe placement sweep: exact signature found once");
         if (sweep) Check(Read<uint32_t>(sweep + 10) == 0x42000000 && Read<uint32_t>(sweep + 18) == 0x42000000, "both radius immediates are 32.0f");
     } else {
-        printf("  [INFO] reflection probe signature: exact=%d, stack-offset-wildcard=%d; optional patch remains disabled\\n",
+        printf("  [INFO] reflection probe signature: exact=%d, stack-offset-wildcard=%d; optional patch remains disabled\n",
                sweepMatches, sweepRelaxed);
     }
 
@@ -260,7 +260,7 @@ void ImageTests(const wchar_t* exePath) {
     if (navMatches == 1) {
         Check(true, "navmesh duplicate-box search: exact signature found once");
     } else {
-        printf("  [INFO] navmesh signature: exact=%d, branch-offset-wildcard=%d; optional patch remains disabled\\n",
+        printf("  [INFO] navmesh signature: exact=%d, branch-offset-wildcard=%d; optional patch remains disabled\n",
                navMatches, navRelaxed);
     }
     FreeLibrary(exe);
