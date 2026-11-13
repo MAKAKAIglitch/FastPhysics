@@ -101,20 +101,27 @@ void SolverTests() {
         std::vector<unsigned char> interior(p.n), interior2(p.n);
         ++total;
         bool ok = FastSolveLcp(p.n, p.A.data(), p.b.data(), p.lo.data(), p.hi.data(), p.dep.data(), x.data(), scratch, nullptr, interior.data(), 0);
-        if (ok) { ++solved; if (Violations(p, x.data()) > 0) ++badSolutions; }
+        if (ok) {
+            ++solved;
+            if (Violations(p, x.data()) > 0 || !ValidateLcpSolution(p.n, p.A.data(), p.b.data(), p.lo.data(), p.hi.data(), p.dep.data(), x.data()))
+                ++badSolutions;
+        }
         // warm start from the cold result (a perfect guess), and from a perturbed problem (a slightly wrong guess)
         ++warmTotal;
         bool ok2 = FastSolveLcp(p.n, p.A.data(), p.b.data(), p.lo.data(), p.hi.data(), p.dep.data(), x2.data(), scratch, interior.data(), interior2.data(), 0);
-        if (ok2 && Violations(p, x2.data()) == 0) ++warmSolved;
+        if (ok2 && Violations(p, x2.data()) == 0 &&
+            ValidateLcpSolution(p.n, p.A.data(), p.b.data(), p.lo.data(), p.hi.data(), p.dep.data(), x2.data())) ++warmSolved;
         Lcp q = p;
         for (int i = 0; i < q.n; ++i) q.b[i] += 0.3f * (float)((i * 7919) % 13 - 6) / 6.0f;
         ++warmTotal;
         bool ok3 = FastSolveLcp(q.n, q.A.data(), q.b.data(), q.lo.data(), q.hi.data(), q.dep.data(), x2.data(), scratch, interior.data(), interior2.data(), 0);
-        if (ok3 && Violations(q, x2.data()) == 0) ++warmSolved;
+        if (ok3 && Violations(q, x2.data()) == 0 &&
+            ValidateLcpSolution(q.n, q.A.data(), q.b.data(), q.lo.data(), q.hi.data(), q.dep.data(), x2.data())) ++warmSolved;
         // every kernel / ordering variant gives a valid solution too
         for (int v : {1, 2, 4, 7, 8}) {
             bool okv = FastSolveLcp(p.n, p.A.data(), p.b.data(), p.lo.data(), p.hi.data(), p.dep.data(), x2.data(), scratch, nullptr, nullptr, v);
-            if (!okv || Violations(p, x2.data()) > 0) ++variantBad;
+            if (!okv || Violations(p, x2.data()) > 0 ||
+                !ValidateLcpSolution(p.n, p.A.data(), p.b.data(), p.lo.data(), p.hi.data(), p.dep.data(), x2.data())) ++variantBad;
         }
     }
     char buf[160];
@@ -222,6 +229,8 @@ void PatchHelperTests() {
         const SIZE_T queried = VirtualQuery(page, &mbi, sizeof(mbi));
         Check(queried == sizeof(mbi) && (mbi.Protect & 0xFF) == PAGE_READONLY,
               "original page protection is restored");
+        Check(IsReadableRange(page, sizeof(before)), "readable-range guard accepts committed read-only memory");
+        Check(!IsWritableRange(page, sizeof(before)), "writable-range guard rejects read-only memory");
     }
     VirtualFree(page, 0, MEM_RELEASE);
 }
@@ -231,6 +240,10 @@ void ImageTests(const wchar_t* exePath) {
     printf("ScrapMechanic.exe image:\n");
     HMODULE exe = LoadLibraryExW(exePath, nullptr, DONT_RESOLVE_DLL_REFERENCES);
     if (!exe) { Check(false, "ScrapMechanic.exe loads as an image (pass its path as the first argument if the game is elsewhere)"); return; }
+    char exeHash[65] = {};
+    const bool hashOk = HashFileSha256(exePath, exeHash);
+    Check(hashOk, "game executable SHA-256 can be calculated");
+    if (hashOk) printf("ScrapMechanic.exe SHA-256: %s\\n", exeHash);
     Check(InitSections(reinterpret_cast<uint8_t*>(exe)), ".text/.rdata/.data sections found");
     void** vt = FindVTable(".?AVbtDantzigSolver@@");
     Check(vt != nullptr && g_rdata.Contains(vt), "btDantzigSolver vtable found through RTTI");
