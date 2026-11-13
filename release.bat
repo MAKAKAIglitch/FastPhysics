@@ -38,5 +38,5 @@ if errorlevel 1 (
 )
 
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package.ps1"
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0package.ps1"
 if errorlevel 1 exit /b 1
