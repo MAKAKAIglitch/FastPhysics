@@ -248,7 +248,7 @@ void PatchHelperTests() {
     Check(FindUnique(duplicateRange, uniqueSig, sizeof(uniqueSig)) == nullptr,
           "exact unique-signature helper rejects duplicate matches without selecting either");
 
-    printf("Memory patch helper:\\n");
+    printf("Memory patch helper:\n");
     SYSTEM_INFO info = {};
     GetSystemInfo(&info);
     auto page = static_cast<uint8_t*>(VirtualAlloc(nullptr, info.dwPageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
