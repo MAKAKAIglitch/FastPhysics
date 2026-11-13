@@ -51,7 +51,11 @@ foreach ($required in @(
     'ValidateLcpSolution',
     'IsWritableRange',
     'InterlockedExchangePointer',
-    'g_runtimeDisabled'
+    'g_runtimeDisabled',
+    'NormalizeProbeSweepRadius',
+    'NormalizeNavMeshFix',
+    'ProbeSweepRadius", 8, ini',
+    'NavMeshFix", 1, ini'
 )) {
     if (-not $fastPhysicsSource.Contains($required)) {
         throw "The 1.0.7 safety guard is missing: $required"
@@ -59,6 +63,15 @@ foreach ($required in @(
 }
 if ($fastPhysicsSource -notmatch 'if \(_stricmp\(actualHash, expectedHash\) != 0\)') {
     throw 'The exact executable SHA-256 mismatch must fail closed.'
+}
+if ($fastPhysicsSource -match 'g_probeSweepRadius\s*=\s*0;\s*g_navMeshFix\s*=\s*0;') {
+    throw 'Optional probe/navmesh features must remain configurable, not forcibly disabled.'
+}
+$pinSuccess = $fastPhysicsSource.IndexOf('game executable SHA-256 pin matched; compatibility gate passed')
+$probePatchCall = $fastPhysicsSource.IndexOf('    PatchProbeSweep();')
+$navPatchCall = $fastPhysicsSource.IndexOf('    PatchNavMesh();')
+if ($pinSuccess -lt 0 -or $probePatchCall -lt $pinSuccess -or $navPatchCall -lt $pinSuccess) {
+    throw 'Optional executable patches must only run after the exact executable hash gate.'
 }
 
 $loaderPath = Join-Path $root 'SMModLoader/src/SMModLoader.cpp'
