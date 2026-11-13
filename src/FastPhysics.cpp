@@ -8,6 +8,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <bcrypt.h>
 #include <intrin.h>
 
 #include <cfloat>
@@ -54,6 +55,67 @@ void Log(const char* fmt, ...) {
     WriteFile(g_log, buf, static_cast<DWORD>(len), &written, nullptr);
 }
 
+bool HashFileSha256(const wchar_t* path, char (&hex)[65]) {
+    hex[0] = '\0';
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    std::vector<UCHAR> object;
+    UCHAR digest[32] = {};
+    DWORD objectLength = 0, hashLength = 0, bytes = 0;
+    bool ok = false;
+
+    NTSTATUS status = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    if (status >= 0 &&
+        BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH, reinterpret_cast<PUCHAR>(&objectLength),
+                          sizeof(objectLength), &bytes, 0) >= 0 &&
+        BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLength),
+                          sizeof(hashLength), &bytes, 0) >= 0 &&
+        hashLength == sizeof(digest)) {
+        object.resize(objectLength);
+        status = BCryptCreateHash(algorithm, &hash, object.data(), objectLength, nullptr, 0, 0);
+        if (status >= 0) {
+            UCHAR buffer[64 * 1024];
+            for (;;) {
+                DWORD read = 0;
+                if (!ReadFile(file, buffer, sizeof(buffer), &read, nullptr)) break;
+                if (read == 0) {
+                    status = BCryptFinishHash(hash, digest, sizeof(digest), 0);
+                    ok = status >= 0;
+                    break;
+                }
+                status = BCryptHashData(hash, buffer, read, 0);
+                if (status < 0) break;
+            }
+        }
+    }
+
+    if (hash) BCryptDestroyHash(hash);
+    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    CloseHandle(file);
+
+    if (!ok) return false;
+    static const char digits[] = "0123456789abcdef";
+    for (size_t i = 0; i < sizeof(digest); ++i) {
+        hex[i * 2] = digits[digest[i] >> 4];
+        hex[i * 2 + 1] = digits[digest[i] & 0x0F];
+    }
+    hex[64] = '\0';
+    return true;
+}
+
+bool IsSha256Hex(const char* value) {
+    if (!value || strlen(value) != 64) return false;
+    for (size_t i = 0; i < 64; ++i) {
+        const char c = value[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
+}
+
 struct Range {
     uint8_t* begin = nullptr;
     uint8_t* end = nullptr;
@@ -86,6 +148,26 @@ bool InitSections(uint8_t* exeBase) {
         else if (strcmp(name, ".data") == 0) g_data = r;
     }
     return g_text.begin && g_rdata.begin && g_data.begin;
+}
+
+bool IsReadableRange(const void* pointer, size_t size) {
+    if (!pointer || size == 0) return false;
+    uintptr_t current = reinterpret_cast<uintptr_t>(pointer);
+    if (current > UINTPTR_MAX - size) return false;
+    const uintptr_t finish = current + size;
+    while (current < finish) {
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (!VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi))) return false;
+        if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) return false;
+        const DWORD protection = mbi.Protect & 0xFF;
+        if (protection != PAGE_READONLY && protection != PAGE_READWRITE &&
+            protection != PAGE_WRITECOPY && protection != PAGE_EXECUTE_READ &&
+            protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY) return false;
+        const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (regionEnd <= current) return false;
+        current = regionEnd < finish ? regionEnd : finish;
+    }
+    return true;
 }
 
 template <typename T>
@@ -315,6 +397,9 @@ double Ms(LONGLONG ticks) { return 1000.0 * static_cast<double>(ticks) / static_
 // Settings
 // ---------------------------------------------------------------------------
 int g_enabled = 1, g_warmStart = 1, g_verify = 0, g_minRows = 0, g_logInterval = 5, g_dumpFailures = 0;
+int g_diagnoseSignatures = 1;
+double g_verifyTolerance = 0.001;
+LONG g_runtimeDisabled = 0;
 
 // ---------------------------------------------------------------------------
 // Warm-start cache: active set of the last solve of the same problem. A bad guess costs time, never correctness.
@@ -432,16 +517,41 @@ thread_local std::vector<unsigned char> t_guess, t_interior;
 thread_local std::vector<float> t_ours;
 
 bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const uint8_t* lo, const uint8_t* hi, const uint8_t* dep, int numIterations, uintptr_t sparsity) {
-    if (!g_enabled) return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
+    if (!g_enabled || InterlockedCompareExchange(&g_runtimeDisabled, 0, 0) != 0)
+        return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
+
+    // The executable SHA-256 pin is checked before the vtable is hooked. These guards
+    // additionally reject unexpected object pointers/layouts before reading solver buffers.
+    if (!A || !b || !x || !lo || !hi || !dep ||
+        !IsReadableRange(A, 0x30) || !IsReadableRange(b, 0x18) ||
+        !IsReadableRange(x, 0x18) || !IsReadableRange(lo, 0x18) ||
+        !IsReadableRange(hi, 0x18) || !IsReadableRange(dep, 0x18)) {
+        EnterCriticalSection(&g_statsCs); ++g_stats.calls; ++g_stats.invalid; LeaveCriticalSection(&g_statsCs);
+        return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
+    }
+
     const int rows = Read<int>(A), cols = Read<int>(A + 4), storage = Read<int>(A + 0x1c);
+    if (rows <= 0 || rows > 4096 || rows != cols || storage != rows * rows) {
+        EnterCriticalSection(&g_statsCs); ++g_stats.calls; ++g_stats.invalid; LeaveCriticalSection(&g_statsCs);
+        return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
+    }
+
     const float* Ad = Read<const float*>(A + 0x28);
     const float* bD = Read<const float*>(b + 0x10);
     float* xD = Read<float*>(x + 0x10);
     const float* loD = Read<const float*>(lo + 0x10);
     const float* hiD = Read<const float*>(hi + 0x10);
     const int* depD = Read<const int*>(dep + 0x10);
-    const bool valid = rows > 0 && rows == cols && storage == rows * cols && Ad && bD && xD && loD && hiD && depD &&
-                       Read<int>(b + 4) == rows && Read<int>(x + 4) == rows && Read<int>(lo + 4) == rows && Read<int>(hi + 4) == rows && Read<int>(dep + 4) == rows;
+    const size_t matrixBytes = sizeof(float) * static_cast<size_t>(rows) * static_cast<size_t>(rows);
+    const size_t vectorBytes = sizeof(float) * static_cast<size_t>(rows);
+    const size_t dependencyBytes = sizeof(int) * static_cast<size_t>(rows);
+    const bool valid = Ad && bD && xD && loD && hiD && depD &&
+                       IsReadableRange(Ad, matrixBytes) && IsReadableRange(bD, vectorBytes) &&
+                       IsReadableRange(xD, vectorBytes) && IsReadableRange(loD, vectorBytes) &&
+                       IsReadableRange(hiD, vectorBytes) && IsReadableRange(depD, dependencyBytes) &&
+                       Read<int>(b + 4) == rows && Read<int>(x + 4) == rows &&
+                       Read<int>(lo + 4) == rows && Read<int>(hi + 4) == rows &&
+                       Read<int>(dep + 4) == rows;
     if (!valid) {
         EnterCriticalSection(&g_statsCs); ++g_stats.calls; ++g_stats.invalid; LeaveCriticalSection(&g_statsCs);
         return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
@@ -458,46 +568,66 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
         key = HashProblem(rows, loD, hiD, depD);
         if (CacheLookup(key, rows, t_guess) && static_cast<int>(t_guess.size()) == rows) { guess = t_guess.data(); hit = true; }
     }
-    // Test mode: run the game's solver first on the untouched problem, keep its answer for comparison.
-    bool verifyNow = g_verifyLeft > 0 && InterlockedDecrement(&g_verifyLeft) >= 0;
+
+    // Verification test: keep the vanilla game's complete answer before attempting FastPhysics.
+    const bool verifyNow = g_verifyLeft > 0 && InterlockedDecrement(&g_verifyLeft) >= 0;
     LONGLONG tOrig = 0;
     bool okOrig = false;
     if (verifyNow) {
-        LONGLONG t1 = Now();
+        const LONGLONG t1 = Now();
         okOrig = g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
         tOrig = Now() - t1;
-        t_ours.assign(xD, xD + rows);   // the game's x
+        t_ours.assign(xD, xD + rows);
     }
 
     t_interior.resize(rows);
-    LONGLONG t0 = Now();
-    // Dantzig can stall on a degenerate pivot (the game's own solver does too). Retry with different arithmetic /
-    // pivot order before giving up: cold, scalar factorisation, then the game's row order.
+    const LONGLONG t0 = Now();
     bool ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, guess, t_interior.data(), 0);
     bool retried = false;
     if (!ok && guess) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 0); }
-    if (!ok) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 2); }   // scalar factorisation
-    if (!ok) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 8); }   // the game's row order
-    if (ok) {   // the game rejects NaN solutions too (its solver falls back to the iterative one); mirror that
-        for (int i = 0; i < rows; ++i) if (xD[i] != xD[i]) { ok = false; break; }
+    if (!ok) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 2); }
+    if (!ok) { retried = true; ok = FastSolveLcp(rows, Ad, bD, loD, hiD, depD, xD, t_scratch, nullptr, t_interior.data(), 8); }
+    if (ok) {
+        for (int i = 0; i < rows; ++i) {
+            if (!std::isfinite(xD[i])) { ok = false; break; }
+        }
     }
-    LONGLONG dt = Now() - t0;
-    if (ok && g_warmStart) CacheStore(key, rows, t_interior);
+    const LONGLONG dt = Now() - t0;
 
     if (verifyNow) {
-        double maxDiff = 0, maxX = 0;
+        double maxDiff = 0.0, maxX = 0.0;
         for (int i = 0; i < rows; ++i) {
-            double d = fabs(static_cast<double>(t_ours[i]) - xD[i]);
+            const double d = fabs(static_cast<double>(t_ours[i]) - static_cast<double>(xD[i]));
             if (d > maxDiff) maxDiff = d;
-            if (fabs(t_ours[i]) > maxX) maxX = fabs(t_ours[i]);
+            const double a = fabs(static_cast<double>(t_ours[i]));
+            if (a > maxX) maxX = a;
         }
-        Log("verify: %d rows | ours %.3f ms (ok %d%s), game %.3f ms (ok %d) | max |x_ours - x_game| %.4g, max |x| %.4g, relative %.2e, warm start %s",
-            rows, Ms(dt), ok ? 1 : 0, retried ? ", cold retry" : "", Ms(tOrig), okOrig ? 1 : 0, maxDiff, maxX, maxX > 0 ? maxDiff / maxX : 0.0, hit ? "hit" : "miss");
-    }
-    if (!ok) {
+        const double tolerance = 1.0e-5 + g_verifyTolerance * (1.0 + maxX);
+        const bool agree = okOrig && ok && maxDiff <= tolerance;
+        Log("verify: %d rows | fast %.3f ms (ok %d%s), game %.3f ms (ok %d) | maxDiff %.6g, tolerance %.6g, warm start %s",
+            rows, Ms(dt), ok ? 1 : 0, retried ? ", cold retry" : "", Ms(tOrig), okOrig ? 1 : 0,
+            maxDiff, tolerance, hit ? "hit" : "miss");
+
+        if (!agree) {
+            // The vanilla result wins. Disable the custom solver for the rest of this process.
+            // No unverified FastPhysics answer is handed to the simulation after a mismatch.
+            if (t_ours.size() == static_cast<size_t>(rows))
+                memcpy(xD, t_ours.data(), vectorBytes);
+            InterlockedExchange(&g_runtimeDisabled, 1);
+            Log("VERIFY MISMATCH: restored vanilla solver output; FastPhysics disabled for this process");
+            EnterCriticalSection(&g_statsCs);
+            ++g_stats.calls; ++g_stats.fallback;
+            if (retried) ++g_stats.retries;
+            LeaveCriticalSection(&g_statsCs);
+            return okOrig;
+        }
+        if (g_warmStart) CacheStore(key, rows, t_interior);
+    } else if (!ok) {
         DumpFailure(rows, Ad, bD, loD, hiD, depD);
         EnterCriticalSection(&g_statsCs); ++g_stats.calls; ++g_stats.fallback; if (retried) ++g_stats.retries; LeaveCriticalSection(&g_statsCs);
         return g_orig(self, A, b, x, lo, hi, dep, numIterations, sparsity);
+    } else if (g_warmStart) {
+        CacheStore(key, rows, t_interior);
     }
 
     bool report = false;
@@ -507,7 +637,7 @@ bool SolveHook(void* self, const uint8_t* A, const uint8_t* b, uint8_t* x, const
     if (hit) ++g_stats.cacheHits;
     if (retried) ++g_stats.retries;
     if (verifyNow) { ++g_stats.origCalls; g_stats.tOrig += tOrig; }
-    LONGLONG now = Now();
+    const LONGLONG now = Now();
     if (Ms(now - g_lastReport) >= 1000.0 * g_logInterval) { g_lastReport = now; report = true; }
     LeaveCriticalSection(&g_statsCs);
     if (report) Report();
@@ -537,6 +667,7 @@ void Init(HMODULE self) {
     QueryPerformanceFrequency(&g_freq);
     g_lastReport = Now();
     wchar_t ini[MAX_PATH];
+    wchar_t expectedHashW[80] = {};
     if (PathNextToModule(self, L"FastPhysics.ini", ini)) {
         g_enabled = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"Enabled", 1, ini));
         g_warmStart = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"WarmStart", 1, ini));
@@ -547,6 +678,10 @@ void Init(HMODULE self) {
         g_dumpFailures = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"DumpFailures", 0, ini));
         g_probeSweepRadius = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"ProbeSweepRadius", 8, ini));
         g_navMeshFix = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"NavMeshFix", 1, ini));
+        g_diagnoseSignatures = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"DiagnoseSignatures", 1, ini));
+        g_verifyTolerance = GetPrivateProfileIntW(L"FastPhysics", L"VerifyTolerancePPM", 1000, ini) / 1000000.0;
+        GetPrivateProfileStringW(L"FastPhysics", L"ExpectedGameExeSHA256", L"", expectedHashW,
+                                 static_cast<DWORD>(sizeof(expectedHashW) / sizeof(expectedHashW[0])), ini);
     }
     if (g_dumpFailures && PathNextToModule(self, L"FastPhysics_fail.bin", path)) {
         g_failDump = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -555,7 +690,40 @@ void Init(HMODULE self) {
     Log("FastPhysics %s loaded (enabled %d, warm start %d, verify %d, min rows %d, probe sweep radius %d, navmesh fix %d)",
         FP_VERSION_STRING, g_enabled, g_warmStart, g_verify, g_minRows, g_probeSweepRadius, g_navMeshFix);
     if (!g_enabled) return;
+    char actualHash[65] = {};
+    wchar_t exePath[MAX_PATH] = {};
+    const DWORD exePathLength = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (exePathLength == 0 || exePathLength >= MAX_PATH || !HashFileSha256(exePath, actualHash)) {
+        Log("could not calculate ScrapMechanic.exe SHA-256; solver hook remains disabled");
+        return;
+    }
+    Log("ScrapMechanic.exe SHA-256: %s", actualHash);
+
+    char expectedHash[80] = {};
+    if (WideCharToMultiByte(CP_ACP, 0, expectedHashW, -1, expectedHash, sizeof(expectedHash), nullptr, nullptr) <= 0 ||
+        !IsSha256Hex(expectedHash)) {
+        Log("ExpectedGameExeSHA256 is empty or invalid; diagnostic mode only, solver hook disabled");
+        if (g_diagnoseSignatures && InitSections(reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr)))) {
+            DiagnoseProbeSweepSignature();
+            DiagnoseNavMeshSignature();
+        }
+        return;
+    }
+    if (_stricmp(actualHash, expectedHash) != 0) {
+        Log("game executable hash does not match ExpectedGameExeSHA256; diagnostic mode only, solver hook disabled");
+        if (g_diagnoseSignatures && InitSections(reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr)))) {
+            DiagnoseProbeSweepSignature();
+            DiagnoseNavMeshSignature();
+        }
+        return;
+    }
+    Log("game executable SHA-256 pin matched; compatibility gate passed");
+
     if (!InitSections(reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr)))) { Log("sections not found"); return; }
+    if (g_diagnoseSignatures) {
+        DiagnoseProbeSweepSignature();
+        DiagnoseNavMeshSignature();
+    }
     PatchProbeSweep();
     PatchNavMesh();
     if (!CpuSupportsAvx2Fma()) { Log("CPU without AVX2/FMA: the solver stays the game's own"); g_enabled = 0; return; }
