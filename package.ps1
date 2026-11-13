@@ -1,6 +1,7 @@
 # Packs the release archives into dist\:
 #   FastPhysics-<version>.zip         - for players (main file on Nexus Mods)
 #   FastPhysics-<version>-source.zip  - source code (optional file)
+#   SHA256SUMS.txt                    - hashes of both DLLs and both archives
 # Run build.bat first, or simply use release.bat.
 # The mod loader (SMModLoader.dll and modloader.ps1) comes from the "Scrap Mechanic Mod Loader"
 # project next to this one (SMModLoader\ in the source archive); release.bat builds it.
@@ -73,6 +74,7 @@ if (Test-Path $unpacked) { Remove-Item $unpacked -Recurse -Force }
 $sourceFiles = @(
     'README.md', 'LICENSE', 'build.bat', 'release.bat', 'package.ps1',
     'docs\HARDENING.md', 'tests\VerifySourcePackage.ps1',
+    'tests\SourceSecurityChecks.ps1', 'tests\InstallerSafetyTest.ps1',
     'src\FastPhysics.cpp', 'src\FastPhysics.rc', 'src\version.h',
     'src\fastlcp.cpp', 'src\fastlcp.h', 'src\lcpkernels.h',
     'tests\SelfTest.cpp',
@@ -93,8 +95,18 @@ foreach ($file in 'README.md', 'build.bat', 'src\SMModLoader.cpp', 'src\SMModLoa
 $sourceZip = Join-Path $dist "FastPhysics-$version-source.zip"
 New-Zip $sourceZip $source
 
+# SHA-256 manifest for release verification; it covers the exact DLLs and ZIPs being published.
+$hashTargets = @($dll, $loaderDll, $mainZip, $sourceZip)
+$manifestLines = foreach ($target in $hashTargets) {
+    $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$hash  $([System.IO.Path]::GetFileName($target))"
+}
+$manifestPath = Join-Path $dist 'SHA256SUMS.txt'
+[System.IO.File]::WriteAllLines($manifestPath, [string[]]$manifestLines, [System.Text.Encoding]::ASCII)
+
 Write-Host "Packed FastPhysics ${version}:" -ForegroundColor Green
 foreach ($zipPath in $mainZip, $sourceZip) {
     $size = [math]::Round((Get-Item $zipPath).Length / 1KB)
     Write-Host "  $zipPath ($size KB)"
 }
+Write-Host "SHA-256 manifest: $manifestPath" -ForegroundColor Green
