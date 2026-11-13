@@ -153,7 +153,7 @@ bool InitSections(uint8_t* exeBase) {
 bool IsReadableRange(const void* pointer, size_t size) {
     if (!pointer || size == 0) return false;
     uintptr_t current = reinterpret_cast<uintptr_t>(pointer);
-    if (current > UINTPTR_MAX - size) return false;
+    if (current > static_cast<uintptr_t>(-1) - size) return false;
     const uintptr_t finish = current + size;
     while (current < finish) {
         MEMORY_BASIC_INFORMATION mbi = {};
