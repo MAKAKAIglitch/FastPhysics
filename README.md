@@ -48,6 +48,19 @@ the log. Both apply even on CPUs without AVX2 (the solver part then stays off).
 Branch `test/scrap-mechanic-1.0.7-signature-diagnostics` produces the separate package
 `FastPhysics-1.2.7.zip`. It is intentionally not the stable 1.2.0 release.
 
+### Build and first diagnostic pass
+
+From the repository root on Windows with Visual Studio 2022 C++ tools installed:
+
+```bat
+release.bat "D:\\SteamLibrary\\steamapps\\common\\Scrap Mechanic\\Release\\ScrapMechanic.exe"
+```
+
+The build runs the local installer/source checks, builds both DLLs and the self-test, tests the target
+`ScrapMechanic.exe` as a non-executed image, and creates `dist/FastPhysics-1.2.7.zip`. The self-test prints
+the target executable SHA-256 and the two optional signature counts. The resulting package ships with a
+blank executable pin, so its first in-game load is diagnostic-only and cannot hook or patch the game.
+
 ### Fail-closed compatibility after game updates
 
 - `ExpectedGameExeSHA256` in `FastPhysics.ini` is an explicit allowlist pin for the exact game executable.
