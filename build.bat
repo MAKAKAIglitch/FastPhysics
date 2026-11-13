@@ -48,7 +48,7 @@ if errorlevel 1 exit /b 1
 cl %CLFLAGS% /arch:AVX2 /c src\fastlcp.cpp /Fo"build\fastlcp.obj"
 if errorlevel 1 exit /b 1
 
-link /nologo /DLL /Brepro /OUT:bin\FastPhysics.dll /IMPLIB:build\FastPhysics.lib build\FastPhysics.obj build\fastlcp.obj build\FastPhysics.res
+link /nologo /DLL /Brepro /OUT:bin\FastPhysics.dll /IMPLIB:build\FastPhysics.lib build\FastPhysics.obj build\fastlcp.obj build\FastPhysics.res bcrypt.lib
 if errorlevel 1 exit /b 1
 
 cl %CLFLAGS% /c tests\SelfTest.cpp /Fo"build\SelfTest.obj"
@@ -57,7 +57,7 @@ if errorlevel 1 exit /b 1
 cl %CLFLAGS% /arch:AVX2 /c src\fastlcp.cpp /Fo"build\fastlcp_test.obj"
 if errorlevel 1 exit /b 1
 
-link /nologo /Brepro /OUT:build\SelfTest.exe build\SelfTest.obj build\fastlcp_test.obj
+link /nologo /Brepro /OUT:build\SelfTest.exe build\SelfTest.obj build\fastlcp_test.obj bcrypt.lib
 if errorlevel 1 exit /b 1
 
 echo.
