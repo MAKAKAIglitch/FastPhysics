@@ -807,6 +807,7 @@ void Init(HMODULE self) {
     g_verifyLeft = g_verify;
     Log("FastPhysics %s loaded (enabled %d, warm start %d, verify %d, min rows %d, probe sweep radius %d, navmesh fix %d)",
         FP_VERSION_STRING, g_enabled, g_warmStart, g_verify, g_minRows, g_probeSweepRadius, g_navMeshFix);
+    Log("diagnostic safety profile: optional probe/navmesh patches forced off; exact game executable SHA-256 pin required");
     if (!g_enabled) return;
     char actualHash[65] = {};
     wchar_t exePath[MAX_PATH] = {};
