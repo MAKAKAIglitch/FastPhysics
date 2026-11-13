@@ -231,6 +231,8 @@ const uint8_t kProbeSweepSig[] = {0x0F, 0x57, 0xC0, 0x0F, 0x29, 0x45, 0x00, 0xC7
 const uint8_t kNavMeshSig[] = {0x48, 0x8B, 0x47, 0x18, 0x48, 0x8B, 0x4F, 0x20, 0x48, 0x3B, 0xC1, 0x74, 0x31, 0x48, 0x8B, 0x13,
                                0x66, 0x90, 0x48, 0x39, 0x10, 0x74, 0x09, 0x48, 0x83, 0xC0, 0x28, 0x48, 0x3B, 0xC1, 0x75, 0xF2};
 void DiagnoseProbeSweepSignature() {
+    const int exactMatches = CountPattern(g_text, kProbeSweepSig, nullptr, sizeof(kProbeSweepSig), nullptr, 0);
+    Log("probe sweep exact signature matches: %d", exactMatches);
     std::vector<uint8_t> relaxedMask(sizeof(kProbeSweepSig), 0xFF);
     // The two ModRM displacement bytes depend on the compiler's stack layout.
     relaxedMask[6] = 0;
@@ -249,6 +251,8 @@ void DiagnoseProbeSweepSignature() {
 }
 
 void DiagnoseNavMeshSignature() {
+    const int exactMatches = CountPattern(g_text, kNavMeshSig, nullptr, sizeof(kNavMeshSig), nullptr, 0);
+    Log("navmesh exact signature matches: %d", exactMatches);
     std::vector<uint8_t> relaxedMask(sizeof(kNavMeshSig), 0xFF);
     // These are rel8 branch destinations; ignore them only while locating candidates.
     // The original EB 3C patch is NOT applied to a relaxed match.
