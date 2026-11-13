@@ -775,14 +775,17 @@ void Init(HMODULE self) {
     if (PathNextToModule(self, L"FastPhysics.ini", ini)) {
         g_enabled = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"Enabled", 1, ini));
         g_warmStart = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"WarmStart", 1, ini));
-        g_verify = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"Verify", 0, ini));
+        g_verify = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"Verify", 512, ini));
+        if (g_verify < 512) g_verify = 512;
         g_minRows = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"MinRows", 0, ini));
         g_logInterval = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"LogIntervalSeconds", 5, ini));
         if (g_logInterval < 1) g_logInterval = 1;
         g_dumpFailures = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"DumpFailures", 0, ini));
-        g_probeSweepRadius = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"ProbeSweepRadius", 8, ini));
-        g_navMeshFix = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"NavMeshFix", 1, ini));
-        g_diagnoseSignatures = static_cast<int>(GetPrivateProfileIntW(L"FastPhysics", L"DiagnoseSignatures", 1, ini));
+        // This diagnostic build never applies the two optional executable-code patches,
+        // even when an older user FastPhysics.ini still contains ProbeSweepRadius=8/NavMeshFix=1.
+        g_probeSweepRadius = 0;
+        g_navMeshFix = 0;
+        g_diagnoseSignatures = 1;
         int tolerancePpm = GetPrivateProfileIntW(L"FastPhysics", L"VerifyTolerancePPM", 1000, ini);
         if (tolerancePpm < 0 || tolerancePpm > 5000) tolerancePpm = 1000;
         g_verifyTolerance = tolerancePpm / 1000000.0;
