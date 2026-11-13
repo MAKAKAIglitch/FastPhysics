@@ -63,7 +63,7 @@ The installer no longer explicitly calls `Unblock-File`.
 - The player and source archives include the original `LICENSE`.
 - `release.bat` runs the mod-loader integration test.
 - `SelfTest.exe --solver-only` supports CI without distributing the proprietary game executable.
-- Windows CI builds both DLLs, runs loader/solver/patch-helper and installer-backup tests, and verifies source archive contents.
+- Windows CI builds both DLLs, runs loader/solver/patch-helper and installer-backup tests, checks native/script sources for unexpected network, remote-process, persistence and dynamic-download capabilities, and verifies source archive contents.
 - On a successful run, CI uploads the two DLLs and both ZIP packages with a SHA-256 manifest for independent scanning.
 
 ## Verification limits
