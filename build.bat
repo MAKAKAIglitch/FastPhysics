@@ -10,10 +10,25 @@ if not exist "%VSWHERE%" (
     echo Visual Studio installer locator was not found: "%VSWHERE%"
     exit /b 1
 )
+
+rem Avoid FOR /F command parsing here: the quoted Program Files path was split at "C:\Program".
 set "VSDIR="
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
+set "VSWHERE_OUTPUT=%TEMP%\FastPhysics-vswhere-%RANDOM%.txt"
+"%VSWHERE%" -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > "%VSWHERE_OUTPUT%"
+if errorlevel 1 (
+    del /q "%VSWHERE_OUTPUT%" >nul 2>&1
+    echo Failed to query Visual Studio installation.
+    exit /b 1
+)
+set /p "VSDIR="<"%VSWHERE_OUTPUT%"
+del /q "%VSWHERE_OUTPUT%" >nul 2>&1
+
 if not defined VSDIR (
     echo Visual Studio with C++ tools was not found.
+    exit /b 1
+)
+if not exist "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Visual Studio C++ environment script was not found: "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat"
     exit /b 1
 )
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
