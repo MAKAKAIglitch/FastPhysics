@@ -197,7 +197,13 @@ T Read(const void* p) {
 }
 
 uint8_t* FindBytes(const Range& r, const void* needle, size_t size, uint8_t* from) {
-    for (uint8_t* p = from; p + size <= r.end; ++p) {
+    if (!r.begin || !r.end || !needle || size == 0 || r.end < r.begin) return nullptr;
+    const size_t rangeSize = static_cast<size_t>(r.end - r.begin);
+    if (size > rangeSize) return nullptr;
+    const uint8_t* last = r.end - size;
+    if (!from || from < r.begin) from = r.begin;
+    if (from > last) return nullptr;
+    for (uint8_t* p = from; p <= last; ++p) {
         if (memcmp(p, needle, size) == 0) return p;
     }
     return nullptr;
@@ -289,9 +295,12 @@ uint8_t* FindUnique(const Range& r, const uint8_t* sig, size_t size) {
 // The diagnostic build uses this only for reporting; relaxed matches are never patched.
 int CountPattern(const Range& r, const uint8_t* pattern, const uint8_t* mask, size_t size,
                  uint8_t** found, int capacity) {
-    if (!r.begin || !r.end || !pattern || size == 0) return 0;
+    if (!r.begin || !r.end || !pattern || size == 0 || r.end < r.begin) return 0;
+    const size_t rangeSize = static_cast<size_t>(r.end - r.begin);
+    if (size > rangeSize) return 0;
+    const uint8_t* last = r.end - size;
     int count = 0;
-    for (uint8_t* p = r.begin; p + size <= r.end; ++p) {
+    for (uint8_t* p = r.begin; p <= last; ++p) {
         bool match = true;
         for (size_t i = 0; i < size; ++i) {
             if ((!mask || mask[i] != 0) && p[i] != pattern[i]) {
