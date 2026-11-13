@@ -43,17 +43,37 @@ Not physics, but found with the same profiler and easier to ship in one mod:
 Both are byte signatures that must match exactly once; otherwise the DLL leaves the code alone and says so in
 the log. Both apply even on CPUs without AVX2 (the solver part then stays off).
 
-## Experimental Scrap Mechanic 1.0.7 diagnostic build
+## Experimental Scrap Mechanic 1.0.7 safety/performance test build
 
 Branch `test/scrap-mechanic-1.0.7-signature-diagnostics` produces the separate package
-`FastPhysics-1.2.0-sm107-test1.zip`. It keeps the normal exact-and-unique checks for both optional
-machine-code patches. If an exact signature does not match, the DLL reports exact and relaxed
-candidate counts plus up to 64 bytes from each candidate location in `FastPhysics.log`.
+`FastPhysics-1.2.7.zip`. It is intentionally not the stable 1.2.0 release.
 
-Relaxed patterns are diagnostic only: they are never used to write into game memory. The physics
-solver hook remains independent of these optional patches. The self-test reports missing optional
-signatures as informational on 1.0.7 while still requiring the solver RTTI/vtable checks to pass.
-This is an experimental diagnostic build, not a release claiming full 1.0.7 compatibility.
+### Fail-closed compatibility after game updates
+
+- `ExpectedGameExeSHA256` in `FastPhysics.ini` is an explicit allowlist pin for the exact game executable.
+  The default is blank. With a blank or mismatched hash, the DLL only logs the executable SHA-256 and scans
+  signatures; it does **not** patch game code or install the physics hook.
+- When Scrap Mechanic is updated, the executable hash changes and FastPhysics stays inactive until that new
+  executable is tested and explicitly pinned. A version number alone is not treated as proof of compatibility.
+- Probe-sweep and NavMesh patches are disabled by default in this test config. Relaxed signatures are diagnostic
+  only and are never used to modify executable memory.
+- Solver buffers are checked for committed/readable memory; the output vector must also be writable. Unexpected
+  layouts and sizes fall back to the original solver.
+
+### Protection against a wrong physics result
+
+- The first 512 solver calls run both the game solver and FastPhysics. The vanilla output is saved first.
+- If either solver fails, their results differ beyond the configured tolerance, or an independent LCP
+  complementarity/bounds check fails, the vanilla output is restored and FastPhysics is disabled for the rest
+  of that game process.
+- After the verification window, the independent LCP validation still runs on every FastPhysics result. A
+  failure returns control to the vanilla solver and disables FastPhysics for the process.
+- The verification window costs extra CPU time because it runs both solvers. Measure performance only after
+  the first 512 solver calls have completed and the log confirms no mismatch.
+
+This is a conservative test path, not a mathematical guarantee against every possible game bug or crash. The
+mod does not open or write world-save files, but physics affects the live simulation; test on a copied world
+and keep the original save untouched.
 
 ## Layout
 
