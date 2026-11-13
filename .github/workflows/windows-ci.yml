@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "hardening/**"
+      - "security/**"
   pull_request:
   workflow_dispatch:
 
@@ -37,6 +38,11 @@ jobs:
         run: |
           build\SelfTest.exe --solver-only
           if errorlevel 1 exit /b 1
+
+      - name: Test installer backup validation
+        shell: pwsh
+        run: |
+          ./tests/InstallerSafetyTest.ps1
 
       - name: Build and verify release archives
         shell: pwsh
