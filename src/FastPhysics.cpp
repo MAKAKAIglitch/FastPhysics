@@ -123,11 +123,32 @@ void** FindVTable(const char* mangledName) {
 }
 
 bool WriteProtected(void* at, const void* bytes, size_t size) {
-    DWORD oldProtect;
-    if (!VirtualProtect(at, size, PAGE_EXECUTE_READWRITE, &oldProtect)) return false;
+    if (!at || !bytes || size == 0) return false;
+    void* backup = HeapAlloc(GetProcessHeap(), 0, size);
+    if (!backup) return false;
+    memcpy(backup, at, size);
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(at, size, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        HeapFree(GetProcessHeap(), 0, backup);
+        return false;
+    }
+
     memcpy(at, bytes, size);
-    VirtualProtect(at, size, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), at, size);
+    const BOOL flushed = FlushInstructionCache(GetCurrentProcess(), at, size);
+    DWORD ignored = 0;
+    const BOOL restored = VirtualProtect(at, size, oldProtect, &ignored);
+    if (!flushed || !restored) {
+        DWORD rollbackProtect = 0;
+        if (VirtualProtect(at, size, PAGE_EXECUTE_READWRITE, &rollbackProtect)) {
+            memcpy(at, backup, size);
+            FlushInstructionCache(GetCurrentProcess(), at, size);
+            VirtualProtect(at, size, oldProtect, &ignored);
+        }
+        HeapFree(GetProcessHeap(), 0, backup);
+        return false;
+    }
+    HeapFree(GetProcessHeap(), 0, backup);
     return true;
 }
 
@@ -172,7 +193,15 @@ void PatchProbeSweep() {
     float r = static_cast<float>(g_probeSweepRadius);
     uint32_t bits;
     memcpy(&bits, &r, 4);
-    if (WriteProtected(at + 10, &bits, 4) && WriteProtected(at + 18, &bits, 4)) Log("reflection probe placement sweep: sphere radius 32 -> %d m", g_probeSweepRadius);
+    uint8_t patch[12];
+    memcpy(patch, at + 10, sizeof(patch));
+    memcpy(patch, &bits, sizeof(bits));
+    memcpy(patch + 8, &bits, sizeof(bits));
+    if (WriteProtected(at + 10, patch, sizeof(patch))) {
+        Log("reflection probe placement sweep: sphere radius 32 -> %d m", g_probeSweepRadius);
+    } else {
+        Log("reflection probe placement sweep: patch failed and was rolled back");
+    }
 }
 
 void PatchNavMesh() {
@@ -443,13 +472,22 @@ void Init(HMODULE self) {
     Log("btDantzigSolver::solveMLCP hooked (original %p)", o);
 }
 
+DWORD WINAPI InitializeWorker(LPVOID context) {
+    Init(static_cast<HMODULE>(context));
+    return 0;
+}
+
 }  // namespace
 
 #ifndef FP_SELFTEST
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(module);
-        Init(module);
+        // Hand work to a worker and never wait for it from DllMain.
+        // File I/O, PE inspection and code patching run after the loader lock is released.
+        // Keep thread notifications enabled: the DLL uses the static CRT (/MT) and TLS.
+        HANDLE worker = CreateThread(nullptr, 0, InitializeWorker, module, 0, nullptr);
+        if (worker) CloseHandle(worker);
+        else OutputDebugStringW(L"FastPhysics: failed to create initialization worker");
     }
     return TRUE;
 }

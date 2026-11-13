@@ -3,12 +3,28 @@ rem Builds the mod loader and the mod, runs the self-test against the installed 
 setlocal
 cd /d "%~dp0"
 
+rem Run source checks before compiling or executing any project-produced binary.
+echo.
+echo Running source security checks...
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0tests\SourceSecurityChecks.ps1"
+if errorlevel 1 exit /b 1
+
+echo.
+echo Running installer backup safety tests...
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0tests\InstallerSafetyTest.ps1"
+if errorlevel 1 exit /b 1
+
 rem The loader: SMModLoader\ in the source archive, otherwise the project next to this one
 set "LOADER=%~dp0SMModLoader"
 if not exist "%LOADER%\build.bat" set "LOADER=%~dp0..\Scrap Mechanic Mod Loader"
 call "%LOADER%\build.bat"
 if errorlevel 1 exit /b 1
 call "%~dp0build.bat"
+if errorlevel 1 exit /b 1
+
+echo.
+echo Running the mod-loader integration test...
+"%LOADER%\build\LoaderTest.exe" "%LOADER%\bin\SMModLoader.dll" "%LOADER%\build\TestMod.dll"
 if errorlevel 1 exit /b 1
 
 echo.
@@ -22,5 +38,5 @@ if errorlevel 1 (
 )
 
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package.ps1"
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0package.ps1"
 if errorlevel 1 exit /b 1

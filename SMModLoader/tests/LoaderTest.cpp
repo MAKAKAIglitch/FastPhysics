@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <string>
 
 namespace {
@@ -52,11 +53,35 @@ int Child() {
     wchar_t dir[MAX_PATH];
     GetModuleFileNameW(nullptr, dir, MAX_PATH);
     wcscpy_s(wcsrchr(dir, L'\\') + 1, 32, L"SMModLoader.dll");
+
+    wchar_t eventName[96];
+    swprintf(eventName, 96, L"Local\\SM.ModLoader.InitDone.%lu", GetCurrentProcessId());
+    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, eventName);
+    if (!done) return 4;
+
     HMODULE loader = LoadLibraryW(dir);
-    if (!loader) return 2;
-    FreeLibrary(loader);
-    loader = LoadLibraryW(dir);
-    return loader ? 0 : 3;
+    if (!loader) { CloseHandle(done); return 2; }
+    if (WaitForSingleObject(done, 10000) != WAIT_OBJECT_0) {
+        CloseHandle(done);
+        return 5;
+    }
+
+    // Load a second copy under a different filename. This exercises the process
+    // mutex without unloading a DLL while its initialization thread is returning.
+    wchar_t secondPath[MAX_PATH];
+    wcscpy_s(secondPath, dir);
+    wcscpy_s(wcsrchr(secondPath, L'\\') + 1, 32, L"SMModLoader2.dll");
+    ResetEvent(done);
+    HMODULE second = LoadLibraryW(secondPath);
+    if (!second) { CloseHandle(done); return 3; }
+    if (WaitForSingleObject(done, 10000) != WAIT_OBJECT_0) {
+        CloseHandle(done);
+        return 6;
+    }
+
+    // Keep both references until process exit; the OS then tears down the worker threads safely.
+    CloseHandle(done);
+    return 0;
 }
 
 }  // namespace
@@ -77,7 +102,7 @@ int wmain(int argc, wchar_t** argv) {
 
     // A clean folder
     for (const wchar_t* f : {L"\\DLLModules\\TestModA.dll", L"\\DLLModules\\TestModB.dll", L"\\DLLModules\\Broken.dll",
-                             L"\\ScrapMechanic.exe", L"\\WorldBuilder.exe", L"\\SMModLoader.dll", L"\\SMModLoader.log",
+                             L"\\ScrapMechanic.exe", L"\\WorldBuilder.exe", L"\\SMModLoader.dll", L"\\SMModLoader2.dll", L"\\SMModLoader.log",
                              L"\\order.txt"}) {
         DeleteFileW((dir + f).c_str());
     }
@@ -85,7 +110,8 @@ int wmain(int argc, wchar_t** argv) {
     CreateDirectoryW(dir.c_str(), nullptr);
     bool ok = CopyFileW(self.c_str(), (dir + L"\\ScrapMechanic.exe").c_str(), FALSE) &&
               CopyFileW(self.c_str(), (dir + L"\\WorldBuilder.exe").c_str(), FALSE) &&
-              CopyFileW(argv[1], (dir + L"\\SMModLoader.dll").c_str(), FALSE);
+              CopyFileW(argv[1], (dir + L"\\SMModLoader.dll").c_str(), FALSE) &&
+              CopyFileW(argv[1], (dir + L"\\SMModLoader2.dll").c_str(), FALSE);
     Check(ok, "test folder laid out");
 
     printf("== No DLLModules folder\n");

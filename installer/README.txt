@@ -66,6 +66,23 @@ Manual install: copy files\FastPhysics.dll and files\FastPhysics.ini
 into Release\DLLModules of any loader that loads DLLs from there.
 
 
+SECURITY
+--------
+SM Mod Loader loads every DLL in Release\DLLModules. Each such mod runs
+inside Scrap Mechanic with the same Windows permissions as the game.
+Only put DLL mods there when you trust their source and have checked
+them. The loader does not certify third-party mods as safe.
+
+The loader uses a restricted DLL dependency search: the mod's own
+folder, the game's folder, and Windows System32. It does not search
+the current working directory or the PATH environment variable.
+
+The installer verifies the Microsoft Authenticode signature of the
+saved original vcruntime DLL before replacing or restoring it. If the
+signature is missing or invalid, installation or removal stops and
+preserves the files for inspection. Do not bypass that check.
+
+
 REQUIREMENTS
 ------------
 - Scrap Mechanic 1.0 (Steam, 64-bit). Tested with 1.0.6.

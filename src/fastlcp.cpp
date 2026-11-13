@@ -5,9 +5,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 typedef float btScalar;
-struct BoolArr { std::vector<unsigned char> v; void resize(size_t n) { v.resize(n); } bool& operator[](size_t i) { return reinterpret_cast<bool*>(v.data())[i]; } };
+
+struct BoolArr {
+    std::unique_ptr<bool[]> v;
+    void resize(size_t n) { v.reset(n ? new bool[n]() : nullptr); }
+    bool& operator[](size_t i) { return v[i]; }
+};
 #define btAssert(x) ((void)0)
 #define BT_INFINITY FLT_MAX
 #define SIMDSQRT12 0.7071067811865475244008443621048490f
@@ -19,7 +25,8 @@ extern thread_local int g_kernelMode;
 // bit0: scalar triangular solves, bit1: scalar factorisation, bit2: scalar large dots
 static inline btScalar btLargeDot(const btScalar* a, const btScalar* b, int n) { if (g_kernelMode & 4) { btScalar s = 0; for (int i = 0; i < n; ++i) s += a[i] * b[i]; return s; } return dot8d(a, b, n); }
 #include <intrin.h>
-struct LcpStats { unsigned long long tCtorScan = 0, tCtorFactor = 0, tRepair = 0, tLoopW = 0, tPush = 0, tWrap = 0; long long evicted = 0, guessed = 0; long long degen = 0, cmd1 = 0, cmd23 = 0, directN = 0, cmd1zero = 0; long long solve1 = 0, toC = 0, NtoC = 0, CtoN = 0, toN = 0, loops = 0; unsigned long long tSolve1 = 0, tAddTL = 0, tRemove = 0, tInit = 0, tW = 0, tTotal = 0; int finalC = 0, finalN = 0; } g_lcp;
+struct LcpStats { unsigned long long tCtorScan = 0, tCtorFactor = 0, tRepair = 0, tLoopW = 0, tPush = 0, tWrap = 0; long long evicted = 0, guessed = 0; long long degen = 0, cmd1 = 0, cmd23 = 0, directN = 0, cmd1zero = 0; long long solve1 = 0, toC = 0, NtoC = 0, CtoN = 0, toN = 0, loops = 0; unsigned long long tSolve1 = 0, tAddTL = 0, tRemove = 0, tInit = 0, tW = 0, tTotal = 0; int finalC = 0, finalN = 0; };
+thread_local LcpStats g_lcp;
 thread_local int g_kernelMode = 0;        // 0 = AVX2 kernels; bits select the original scalar kernels (A/B testing)
 thread_local int g_detectUnbounded = 1;   // 0 = behave like the game build (no unbounded block)
 void fSolveL1_scalar (const btScalar *L, btScalar *B, int n, int lskip1);

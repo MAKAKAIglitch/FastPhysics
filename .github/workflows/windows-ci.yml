@@ -1,0 +1,78 @@
+name: Windows build and tests
+
+on:
+  push:
+    branches:
+      - main
+      - "hardening/**"
+      - "security/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build loader and FastPhysics
+        shell: cmd
+        run: |
+          call SMModLoader\build.bat
+          if errorlevel 1 exit /b 1
+          call build.bat
+          if errorlevel 1 exit /b 1
+
+      - name: Test mod loader
+        shell: cmd
+        run: |
+          SMModLoader\build\LoaderTest.exe SMModLoader\bin\SMModLoader.dll SMModLoader\build\TestMod.dll
+          if errorlevel 1 exit /b 1
+
+      - name: Test solver and patch helpers
+        shell: cmd
+        run: |
+          build\SelfTest.exe --solver-only
+          if errorlevel 1 exit /b 1
+
+      - name: Test installer backup validation
+        shell: pwsh
+        run: |
+          ./tests/InstallerSafetyTest.ps1
+
+      - name: Check for unexpected dangerous capabilities
+        shell: pwsh
+        run: |
+          ./tests/SourceSecurityChecks.ps1
+
+      - name: Build and verify release archives
+        shell: pwsh
+        run: |
+          ./package.ps1
+          ./tests/VerifySourcePackage.ps1
+
+      - name: Create SHA-256 manifest
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath "bin" -Filter "*.dll" -File) + @(Get-ChildItem -LiteralPath "dist" -Filter "*.zip" -File)
+          if ($files.Count -lt 4) { throw "Expected two DLLs and two ZIP archives; found $($files.Count) files." }
+          $lines = foreach ($file in ($files | Sort-Object FullName)) {
+            "$((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash)  $($file.Name)"
+          }
+          $lines | Set-Content -LiteralPath "dist/SHA256SUMS.txt" -Encoding ascii
+          Get-Content -LiteralPath "dist/SHA256SUMS.txt"
+
+      - name: Upload scanned build inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2, GitHub-verified commit
+        with:
+          name: FastPhysics-Windows-x64
+          path: |
+            bin/*.dll
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7

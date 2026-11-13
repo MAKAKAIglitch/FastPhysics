@@ -1,14 +1,34 @@
 @echo off
 rem Builds bin\FastPhysics.dll and build\SelfTest.exe.
-rem Requires Visual Studio with the "Desktop development with C++" workload.
+rem Only src\fastlcp.cpp is compiled with /arch:AVX2; host/dispatch code stays baseline x64.
+rem Requires Visual Studio 2022 with the "Desktop development with C++" workload.
 setlocal
 cd /d "%~dp0"
 
-set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" (
+    echo Visual Studio installer locator was not found: "%VSWHERE%"
+    exit /b 1
+)
+
+rem Avoid FOR /F command parsing here: the quoted Program Files path was split at "C:\Program".
 set "VSDIR="
-for /f "usebackq delims=" %%i in (`vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
+set "VSWHERE_OUTPUT=%TEMP%\FastPhysics-vswhere-%RANDOM%.txt"
+"%VSWHERE%" -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > "%VSWHERE_OUTPUT%"
+if errorlevel 1 (
+    del /q "%VSWHERE_OUTPUT%" >nul 2>&1
+    echo Failed to query Visual Studio installation.
+    exit /b 1
+)
+set /p "VSDIR="<"%VSWHERE_OUTPUT%"
+del /q "%VSWHERE_OUTPUT%" >nul 2>&1
+
 if not defined VSDIR (
     echo Visual Studio with C++ tools was not found.
+    exit /b 1
+)
+if not exist "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" (
+    echo Visual Studio C++ environment script was not found: "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat"
     exit /b 1
 )
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
@@ -17,17 +37,27 @@ if errorlevel 1 exit /b 1
 if not exist bin mkdir bin
 if not exist build mkdir build
 
-rem /MT links the CRT statically, so the DLL imports only KERNEL32. /arch:AVX2 is required by the solver kernels
-rem (the DLL checks the CPU at start-up and stays inactive without AVX2/FMA).
-set "CLFLAGS=/nologo /O2 /MT /utf-8 /W3 /permissive- /std:c++17 /EHs-c- /D_HAS_EXCEPTIONS=0 /arch:AVX2 /I src /Fobuild\"
+set "CLFLAGS=/nologo /O2 /MT /utf-8 /W4 /permissive- /std:c++17 /EHs-c- /D_HAS_EXCEPTIONS=0 /Brepro /I src"
 
 rc /nologo /fo build\FastPhysics.res src\FastPhysics.rc
 if errorlevel 1 exit /b 1
 
-cl %CLFLAGS% src\FastPhysics.cpp src\fastlcp.cpp build\FastPhysics.res /LD /link /OUT:bin\FastPhysics.dll /IMPLIB:build\FastPhysics.lib
+cl %CLFLAGS% /c src\FastPhysics.cpp /Fo"build\FastPhysics.obj"
 if errorlevel 1 exit /b 1
 
-cl %CLFLAGS% tests\SelfTest.cpp src\fastlcp.cpp /link /OUT:build\SelfTest.exe
+cl %CLFLAGS% /arch:AVX2 /c src\fastlcp.cpp /Fo"build\fastlcp.obj"
+if errorlevel 1 exit /b 1
+
+link /nologo /DLL /Brepro /OUT:bin\FastPhysics.dll /IMPLIB:build\FastPhysics.lib build\FastPhysics.obj build\fastlcp.obj build\FastPhysics.res
+if errorlevel 1 exit /b 1
+
+cl %CLFLAGS% /c tests\SelfTest.cpp /Fo"build\SelfTest.obj"
+if errorlevel 1 exit /b 1
+
+cl %CLFLAGS% /arch:AVX2 /c src\fastlcp.cpp /Fo"build\fastlcp_test.obj"
+if errorlevel 1 exit /b 1
+
+link /nologo /Brepro /OUT:build\SelfTest.exe build\SelfTest.obj build\fastlcp_test.obj
 if errorlevel 1 exit /b 1
 
 echo.

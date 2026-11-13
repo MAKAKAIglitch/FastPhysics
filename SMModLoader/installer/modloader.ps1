@@ -21,10 +21,30 @@ function Test-CompanyDll([string]$Path, [string]$Company) {
     (Test-Path $Path) -and ((Get-Item $Path).VersionInfo.CompanyName -match $Company)
 }
 
-# Copies a file and strips the "downloaded from the internet" mark from the copy
+function Test-MicrosoftSignedDll([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $signature = Get-AuthenticodeSignature -FilePath $Path
+        if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) { return $false }
+        return ($signature.SignerCertificate.Subject -match '(^|,\s*)CN=Microsoft Corporation(,|$)')
+    }
+    catch { return $false }
+}
+
+# Stage a copy beside the destination and verify SHA-256 before replacement.
+# Do not explicitly remove Windows' Mark-of-the-Web metadata.
 function Copy-ModFile([string]$Source, [string]$Target) {
-    Copy-Item $Source $Target -Force
-    Unblock-File $Target -ErrorAction SilentlyContinue
+    $temp = "$Target.$PID.tmp"
+    try {
+        $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+        Copy-Item -LiteralPath $Source -Destination $temp -Force
+        $copyHash = (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash
+        if ($copyHash -ne $sourceHash) { throw "SHA-256 verification failed while copying $Source" }
+        Move-Item -LiteralPath $temp -Destination $Target -Force
+    }
+    finally {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Does the file contain the text (ASCII, or UTF-16 with -Wide)? Compared byte for byte.
@@ -101,28 +121,44 @@ function Install-ModLoader([string]$Release, [string]$LoaderDll) {
     }
 
     if ((Test-Path $vc) -and (Get-DllProduct $vc) -ne $script:LoaderProduct -and
-        -not (Test-LegacyTimeStop $vc) -and -not (Test-CompanyDll $vc 'Microsoft')) {
+        -not (Test-LegacyTimeStop $vc) -and -not (Test-MicrosoftSignedDll $vc)) {
         throw "$vc has been replaced by another mod loader. Installation stopped so that it is not broken. If that loader loads mods from Release\DLLModules, copy the mod there by hand (see README.txt, manual install)."
     }
 
     New-Item -ItemType Directory -Force $modules | Out-Null
     Move-LegacyMods $Release
 
-    if (Test-CompanyDll $vc 'Microsoft') {
-        # A leftover from an earlier install that Steam has undone ("Verify integrity of game files")
-        if (Test-Path $vcOrig) { Remove-Item $vcOrig -Force }
-        Move-Item $vc $vcOrig
-        Copy-ModFile $LoaderDll $vc
+    if (Test-MicrosoftSignedDll $vc) {
+        if (Test-Path $vcOrig) {
+            if (-not (Test-MicrosoftSignedDll $vcOrig)) {
+                throw "$vcOrig exists but is not a valid Microsoft-signed runtime. It was left untouched; installation stopped."
+            }
+            Remove-Item -LiteralPath $vcOrig -Force
+        }
+        Move-Item -LiteralPath $vc -Destination $vcOrig
+        try {
+            Copy-ModFile $LoaderDll $vc
+        }
+        catch {
+            Move-Item -LiteralPath $vcOrig -Destination $vc -Force
+            throw
+        }
     }
     elseif (-not (Test-Path $vc)) {
         if (-not (Test-Path $vcOrig)) {
             throw "$vc is missing. Verify the game files in Steam, then run Install.bat again."
+        }
+        if (-not (Test-MicrosoftSignedDll $vcOrig)) {
+            throw "$vcOrig is not a valid Microsoft-signed runtime. It was left untouched; installation stopped."
         }
         Copy-ModFile $LoaderDll $vc
     }
     else {
         if (-not (Test-Path $vcOrig)) {
             throw "$vcOrig is missing. Verify the game files in Steam, then run Install.bat again."
+        }
+        if (-not (Test-MicrosoftSignedDll $vcOrig)) {
+            throw "$vcOrig is not a valid Microsoft-signed runtime. It was left untouched; installation stopped."
         }
         if ((Get-DllVersion $LoaderDll) -gt (Get-DllVersion $vc)) {
             Copy-ModFile $LoaderDll $vc
@@ -143,12 +179,19 @@ function Uninstall-ModLoaderIfUnused([string]$Release) {
         if (-not (Test-Path $vcOrig)) {
             throw "$vcOrig is missing. Verify the game files in Steam - that restores the original DLL."
         }
+        if (-not (Test-MicrosoftSignedDll $vcOrig)) {
+            throw "$vcOrig is not a valid Microsoft-signed runtime. The loader was left in place and the file was not restored."
+        }
+        # Validate the backup before removing the working loader.
         Remove-Item $vc -Force
         Move-Item $vcOrig $vc
     }
-    elseif ((Test-Path $vcOrig) -and (Test-CompanyDll $vc 'Microsoft')) {
-        # Steam has already restored the original - only the leftover copy remains
-        Remove-Item $vcOrig -Force
+    elseif ((Test-Path $vcOrig) -and (Test-MicrosoftSignedDll $vc)) {
+        # Steam has already restored the original - only discard a backup that is also
+        # Microsoft-signed. An unknown file is preserved for manual inspection.
+        if (Test-MicrosoftSignedDll $vcOrig) {
+            Remove-Item $vcOrig -Force
+        }
     }
     Remove-Item (Join-Path $Release 'SMModLoader.log') -ErrorAction SilentlyContinue
     if ((Test-Path $modules) -and -not (Get-ChildItem $modules -Force)) {

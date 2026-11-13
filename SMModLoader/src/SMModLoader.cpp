@@ -105,8 +105,14 @@ void LoadMods(HMODULE self) {
         if (swprintf(path, MAX_PATH, L"%ls\\%ls", dir, names[i]) < 0) continue;
         char name[MAX_PATH * 3] = {};
         WideCharToMultiByte(CP_UTF8, 0, names[i], -1, name, sizeof(name) - 1, nullptr, nullptr);
-        // The mod's own dependencies are looked up next to it first
-        HMODULE mod = LoadLibraryExW(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        // Resolve dependencies only beside this mod, beside the game, in explicitly added
+        // DLL directories, or in System32. Do not search the current directory or PATH:
+        // that avoids the usual DLL-preloading search locations.
+        constexpr DWORD kSafeLoadFlags =
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+            LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
+            LOAD_LIBRARY_SEARCH_SYSTEM32;
+        HMODULE mod = LoadLibraryExW(path, nullptr, kSafeLoadFlags);
         if (mod) Log("Loaded %s", name);
         else Log("Failed to load %s (error %lu)", name, GetLastError());
     }
@@ -117,8 +123,19 @@ void Init(HMODULE self) {
 
     wchar_t mutexName[64];
     swprintf(mutexName, 64, L"Local\\SM.ModLoader.%lu", GetCurrentProcessId());
-    CreateMutexW(nullptr, FALSE, mutexName);
-    if (GetLastError() == ERROR_ALREADY_EXISTS) return;  // another copy already loaded the mods
+    SetLastError(ERROR_SUCCESS);
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName);
+    const DWORD mutexError = GetLastError();
+    if (!mutex) {
+        OutputDebugStringW(L"SM Mod Loader: failed to create the process mutex");
+        return;
+    }
+    if (mutexError == ERROR_ALREADY_EXISTS) {
+        CloseHandle(mutex);
+        return;
+    }
+    // Intentionally keep the first handle open until process exit. It prevents a
+    // later DLL reload from loading the same mod set a second time.
 
     OpenLog(self);
     Log("SM Mod Loader %s", SMML_VERSION_STRING);
@@ -129,12 +146,28 @@ void Init(HMODULE self) {
     }
 }
 
+DWORD WINAPI InitializationThread(LPVOID context) {
+    Init(static_cast<HMODULE>(context));
+
+    wchar_t eventName[96];
+    swprintf(eventName, 96, L"Local\\SM.ModLoader.InitDone.%lu", GetCurrentProcessId());
+    HANDLE done = CreateEventW(nullptr, TRUE, FALSE, eventName);
+    if (done) {
+        SetEvent(done);
+        CloseHandle(done);
+    }
+    return 0;
+}
+
 }  // namespace
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(module);
-        Init(module);
+        // No nested LoadLibraryEx or file work under the loader lock; do not wait here.
+        // Thread notifications remain enabled for the static CRT (/MT) and TLS.
+        HANDLE worker = CreateThread(nullptr, 0, InitializationThread, module, 0, nullptr);
+        if (worker) CloseHandle(worker);
+        else OutputDebugStringW(L"SM Mod Loader: failed to create initialization worker");
     }
     return TRUE;
 }
