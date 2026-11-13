@@ -45,6 +45,10 @@ function Assert([bool]$Condition, [string]$Message) {
     Write-Host "[PASS] $Message" -ForegroundColor Green
 }
 
+Assert (Test-MicrosoftSignerSubject 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US') 'Microsoft Corporation signer subject is accepted'
+Assert (Test-MicrosoftSignerSubject 'CN=Microsoft Windows Software Compatibility Publisher, O=Microsoft Corporation, L=Redmond, S=Washington, C=US') 'Microsoft Windows Software Compatibility Publisher signer subject is accepted'
+Assert (-not (Test-MicrosoftSignerSubject 'CN=Microsoft Corporation, O=Untrusted Example, C=US')) 'a Microsoft-like CN with a non-Microsoft organization is rejected'
+
 function Expect-Failure([scriptblock]$Action, [string]$Message) {
     $failed = $false
     try { & $Action } catch { $failed = $true }
