@@ -109,7 +109,9 @@ void LoadMods(HMODULE self) {
         // DLL directories, or in System32. Do not search the current directory or PATH:
         // that avoids the usual DLL-preloading search locations.
         constexpr DWORD kSafeLoadFlags =
-            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+            LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
+            LOAD_LIBRARY_SEARCH_SYSTEM32;
         HMODULE mod = LoadLibraryExW(path, nullptr, kSafeLoadFlags);
         if (mod) Log("Loaded %s", name);
         else Log("Failed to load %s (error %lu)", name, GetLastError());
