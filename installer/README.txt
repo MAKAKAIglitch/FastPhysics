@@ -109,8 +109,15 @@ Release\DLLModules\FastPhysics.ini (changes apply on the next start):
                         Blank/mismatch = no hook or game-code patches.
   DiagnoseSignatures=1   Logs exact and relaxed signature candidates;
                         relaxed matches are never patched.
-  ProbeSweepRadius=0     Leave the game's reflection-probe code unchanged.
-  NavMeshFix=0           Leave the game's NavMesh code unchanged.
+  ProbeSweepRadius=8     Use an 8 m sphere for reflection probes.
+                        Set to 0 to keep the game's original 32 m sphere.
+                        Valid enabled radii: 1..31.
+  NavMeshFix=1           Skip the NavMesh duplicate-box walk.
+                        Set to 0 to keep the game's original code.
+  The two patches are independent. Each requires the exact EXE hash
+  pin above and one exact, unique byte signature; missing or duplicate
+  signatures leave that feature unchanged. Relaxed matches are diagnostic
+  only and are never patched.
   Verify=512             Compare the first 512 fast solves with the
                          vanilla solver. A mismatch restores the vanilla
                          output and disables FastPhysics for that process.
