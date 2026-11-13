@@ -68,7 +68,9 @@ blank executable pin, so its first in-game load is diagnostic-only and cannot ho
   signatures; it does **not** patch game code or install the physics hook.
 - When Scrap Mechanic is updated, the executable hash changes and FastPhysics stays inactive until that new
   executable is tested and explicitly pinned. A version number alone is not treated as proof of compatibility.
-- Probe-sweep and NavMesh patches are disabled by default in this test config. Relaxed signatures are diagnostic
+- Probe-sweep and NavMesh patches are independently configurable. This test config requests an 8 m probe radius
+  and enables the NavMesh fix; each patch still requires the exact executable hash gate and one exact, unique
+  signature. Missing or duplicate signatures leave that feature unchanged. Relaxed signatures are diagnostic
   only and are never used to modify executable memory.
 - Solver buffers are checked for committed/readable memory; the output vector must also be writable. Unexpected
   layouts and sizes fall back to the original solver.
@@ -115,8 +117,17 @@ AVX2 tests when the processor or OS lacks AVX2/FMA.
 
 ## Settings
 
-`FastPhysics.ini` next to the DLL: `Enabled`, `WarmStart`, `LogIntervalSeconds`, and for troubleshooting `Verify`
-(runs the game's solver too and logs the difference), `MinRows`, `DumpFailures`.
+`FastPhysics.ini` next to the DLL:
+
+- `ProbeSweepRadius=8`: set a radius from 1 to 31 metres; `0` keeps the game's 32 m radius unchanged.
+- `NavMeshFix=1`: skips the duplicate static-box walk; `0` leaves the game's code unchanged.
+- These two patches are independent. A patch only runs after the exact EXE SHA-256 pin matches and its full
+  signature appears exactly once. A missing or duplicate signature causes a no-op, not a relaxed-signature patch.
+- `DiagnoseSignatures=1` logs exact and relaxed candidates; relaxed candidates are never patched.
+- Other settings include `Enabled`, `WarmStart`, `LogIntervalSeconds`, `Verify` (runs the game's solver too and logs
+  the difference), `MinRows`, and `DumpFailures`.
+
+Set either optional feature to `0` to test the other one in isolation.
 
 ## Licence
 
