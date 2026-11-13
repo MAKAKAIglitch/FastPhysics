@@ -44,6 +44,11 @@ jobs:
         run: |
           ./tests/InstallerSafetyTest.ps1
 
+      - name: Check for unexpected dangerous capabilities
+        shell: pwsh
+        run: |
+          ./tests/SourceSecurityChecks.ps1
+
       - name: Build and verify release archives
         shell: pwsh
         run: |
