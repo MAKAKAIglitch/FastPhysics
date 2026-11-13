@@ -40,3 +40,8 @@ if errorlevel 1 (
 echo.
 powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0package.ps1"
 if errorlevel 1 exit /b 1
+
+echo.
+echo Verifying the source archive...
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0tests\VerifySourcePackage.ps1"
+if errorlevel 1 exit /b 1
