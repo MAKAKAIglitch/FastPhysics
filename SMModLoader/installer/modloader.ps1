@@ -157,6 +157,9 @@ function Install-ModLoader([string]$Release, [string]$LoaderDll) {
         if (-not (Test-Path $vcOrig)) {
             throw "$vcOrig is missing. Verify the game files in Steam, then run Install.bat again."
         }
+        if (-not (Test-MicrosoftSignedDll $vcOrig)) {
+            throw "$vcOrig is not a valid Microsoft-signed runtime. It was left untouched; installation stopped."
+        }
         if ((Get-DllVersion $LoaderDll) -gt (Get-DllVersion $vc)) {
             Copy-ModFile $LoaderDll $vc
         }
@@ -176,12 +179,19 @@ function Uninstall-ModLoaderIfUnused([string]$Release) {
         if (-not (Test-Path $vcOrig)) {
             throw "$vcOrig is missing. Verify the game files in Steam - that restores the original DLL."
         }
+        if (-not (Test-MicrosoftSignedDll $vcOrig)) {
+            throw "$vcOrig is not a valid Microsoft-signed runtime. The loader was left in place and the file was not restored."
+        }
+        # Validate the backup before removing the working loader.
         Remove-Item $vc -Force
         Move-Item $vcOrig $vc
     }
     elseif ((Test-Path $vcOrig) -and (Test-MicrosoftSignedDll $vc)) {
-        # Steam has already restored the original - only the leftover copy remains
-        Remove-Item $vcOrig -Force
+        # Steam has already restored the original - only discard a backup that is also
+        # Microsoft-signed. An unknown file is preserved for manual inspection.
+        if (Test-MicrosoftSignedDll $vcOrig) {
+            Remove-Item $vcOrig -Force
+        }
     }
     Remove-Item (Join-Path $Release 'SMModLoader.log') -ErrorAction SilentlyContinue
     if ((Test-Path $modules) -and -not (Get-ChildItem $modules -Force)) {
