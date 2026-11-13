@@ -16,10 +16,19 @@ try {
         ($prefix + 'LICENSE'),
         ($prefix + 'README.md'),
         ($prefix + 'docs/HARDENING.md'),
+        ($prefix + 'build.bat'),
+        ($prefix + 'release.bat'),
+        ($prefix + 'package.ps1'),
+        ($prefix + 'tests/VerifySourcePackage.ps1'),
+        ($prefix + 'tests/SourceSecurityChecks.ps1'),
+        ($prefix + 'tests/InstallerSafetyTest.ps1'),
+        ($prefix + 'tests/SelfTest.cpp'),
         ($prefix + 'src/FastPhysics.cpp'),
         ($prefix + 'src/fastlcp.cpp'),
+        ($prefix + 'SMModLoader/build.bat'),
         ($prefix + 'SMModLoader/src/SMModLoader.cpp'),
-        ($prefix + 'SMModLoader/installer/modloader.ps1')
+        ($prefix + 'SMModLoader/installer/modloader.ps1'),
+        ($prefix + 'SMModLoader/tests/LoaderTest.cpp')
     )
     foreach ($entry in $required) { if ($names -notcontains $entry) { throw "Missing source entry: $entry" } }
     $licenseEntry = $archive.GetEntry($prefix + 'LICENSE')
