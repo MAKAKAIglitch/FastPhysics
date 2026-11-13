@@ -163,6 +163,88 @@ uint8_t* FindUnique(const Range& r, const uint8_t* sig, size_t size) {
     return FindBytes(r, sig, size, first + 1) ? nullptr : first;
 }
 
+// Counts exact or masked matches in a section. A zero mask byte is a wildcard.
+// The diagnostic build uses this only for reporting; relaxed matches are never patched.
+int CountPattern(const Range& r, const uint8_t* pattern, const uint8_t* mask, size_t size,
+                 uint8_t** found, int capacity) {
+    if (!r.begin || !r.end || !pattern || size == 0) return 0;
+    int count = 0;
+    for (uint8_t* p = r.begin; p + size <= r.end; ++p) {
+        bool match = true;
+        for (size_t i = 0; i < size; ++i) {
+            if ((!mask || mask[i] != 0) && p[i] != pattern[i]) {
+                match = false;
+                break;
+            }
+        }
+        if (!match) continue;
+        if (found && count < capacity) found[count] = p;
+        if (count < INT_MAX) ++count;
+    }
+    return count;
+}
+
+void LogPatternCandidate(const char* label, int index, const uint8_t* at) {
+    if (!at || !g_text.end || at >= g_text.end) return;
+    size_t length = static_cast<size_t>(g_text.end - at);
+    if (length > 64) length = 64;
+    char hex[64 * 3] = {};
+    size_t used = 0;
+    for (size_t i = 0; i < length; ++i) {
+        int written = snprintf(hex + used, sizeof(hex) - used, "%02X%s",
+                               at[i], (i + 1 == length) ? "" : " ");
+        if (written <= 0 || static_cast<size_t>(written) >= sizeof(hex) - used) break;
+        used += static_cast<size_t>(written);
+    }
+    Log("%s candidate %d at RVA 0x%llX (%u bytes): %s",
+        label, index, static_cast<unsigned long long>(at - g_base),
+        static_cast<unsigned>(length), hex);
+}
+
+void LogPatternCandidates(const char* label, const uint8_t* pattern, const uint8_t* mask, size_t size) {
+    uint8_t* found[3] = {};
+    const int count = CountPattern(g_text, pattern, mask, size, found, 3);
+    Log("%s: %d match(es)%s", label, count, count > 3 ? " (first 3 shown)" : "");
+    for (int i = 0; i < count && i < 3; ++i) LogPatternCandidate(label, i + 1, found[i]);
+}
+
+void DiagnoseProbeSweepSignature() {
+    std::vector<uint8_t> relaxedMask(sizeof(kProbeSweepSig), 0xFF);
+    // The two ModRM displacement bytes depend on the compiler's stack layout.
+    relaxedMask[6] = 0;
+    relaxedMask[9] = 0;
+    LogPatternCandidates("probe sweep relaxed signature (stack offsets ignored)",
+                         kProbeSweepSig, relaxedMask.data(), sizeof(kProbeSweepSig));
+
+    const uint8_t radius32[] = {0xC7, 0x45, 0x00, 0x00, 0x00, 0x00, 0x42};
+    const uint8_t radius32Mask[] = {0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF};
+    LogPatternCandidates("probe sweep 32.0f immediate anchor",
+                         radius32, radius32Mask, sizeof(radius32));
+
+    const uint8_t secondRadius[] = {0x48, 0xC7, 0x45, 0x10, 0x00, 0x00, 0x00, 0x42};
+    LogPatternCandidates("probe sweep second-radius anchor",
+                         secondRadius, nullptr, sizeof(secondRadius));
+}
+
+void DiagnoseNavMeshSignature() {
+    std::vector<uint8_t> relaxedMask(sizeof(kNavMeshSig), 0xFF);
+    // These are rel8 branch destinations; ignore them only while locating candidates.
+    // The original EB 3C patch is NOT applied to a relaxed match.
+    relaxedMask[12] = 0;
+    relaxedMask[22] = 0;
+    relaxedMask[31] = 0;
+    LogPatternCandidates("navmesh relaxed signature (branch offsets ignored)",
+                         kNavMeshSig, relaxedMask.data(), sizeof(kNavMeshSig));
+
+    const uint8_t loopStart[] = {
+        0x48, 0x8B, 0x47, 0x18, 0x48, 0x8B, 0x4F, 0x20, 0x48, 0x3B, 0xC1
+    };
+    LogPatternCandidates("navmesh loop-start anchor", loopStart, nullptr, sizeof(loopStart));
+
+    const uint8_t loopTail[] = {0x48, 0x83, 0xC0, 0x28, 0x48, 0x3B, 0xC1};
+    LogPatternCandidates("navmesh loop-tail anchor", loopTail, nullptr, sizeof(loopTail));
+}
+
 // ---------------------------------------------------------------------------
 // Two small fixes for big static builds. They have nothing to do with the solver, they just live here
 // because one mod is easier to install than three.
@@ -189,7 +271,11 @@ int g_probeSweepRadius = 8, g_navMeshFix = 1;
 void PatchProbeSweep() {
     if (g_probeSweepRadius <= 0 || g_probeSweepRadius >= 32) return;
     uint8_t* at = FindUnique(g_text, kProbeSweepSig, sizeof kProbeSweepSig);
-    if (!at) { Log("probe sweep: signature not found or not unique, left as in the game"); return; }
+    if (!at) {
+        Log("probe sweep: exact signature not found or not unique; patch left unchanged");
+        DiagnoseProbeSweepSignature();
+        return;
+    }
     float r = static_cast<float>(g_probeSweepRadius);
     uint32_t bits;
     memcpy(&bits, &r, 4);
@@ -207,7 +293,11 @@ void PatchProbeSweep() {
 void PatchNavMesh() {
     if (!g_navMeshFix) return;
     uint8_t* at = FindUnique(g_text, kNavMeshSig, sizeof kNavMeshSig);
-    if (!at) { Log("navmesh fix: signature not found or not unique, left as in the game"); return; }
+    if (!at) {
+        Log("navmesh fix: exact signature not found or not unique; patch left unchanged");
+        DiagnoseNavMeshSignature();
+        return;
+    }
     const uint8_t jmp[] = {0xEB, 0x3C};   // where the je in the signature lands: past the walk and the assert
     if (WriteProtected(at, jmp, sizeof jmp)) Log("navmesh static-box registration: duplicate search skipped");
 }
